@@ -1,7 +1,20 @@
 [project]
 name = "intelligent-testing"
 version = "0.1.0"
-description = "Add your description here"
+description = "Data and notebook workflow for intelligent testing research"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
+
+[project.scripts]
+intelligent-testing = "intelligent_testing.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
