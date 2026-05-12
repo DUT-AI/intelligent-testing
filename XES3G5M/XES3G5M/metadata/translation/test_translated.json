@@ -1,0 +1,135 @@
+{
+    "0": {
+        "content": "Trường có 4 lớp sở thích: múa, hát, cờ vây và vẽ tranh. Ba đứa trẻ Xiaoyu, Xiaoming và Xiaoli đã sẵn sàng đăng ký. Mỗi người trong số họ chỉ có thể đăng ký một lớp và mỗi lớp là khác nhau. Có nhiều phương pháp đăng ký khác nhau.",
+        "kc_routes": [
+            "Mở rộng tư duy của bạn ---- mô-đun đếm ---- nguyên tắc cộng và nhân ---- nguyên tắc nhân ---- các loại khác trong nguyên tắc nhân"
+        ],
+        "answer": [
+            "$$24$$"
+        ],
+        "analysis": "Xiaoyu chọn trước, có $$4$$ cách, tiếp theo Xiaoming chọn, có $$3$$ cách, cuối cùng Xiaoli chọn, có $$2$$ cách, vì vậy tất cả có $$4\\times3\\times2=24$$（cách）．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "1": {
+        "content": "Trên giá sách có $$2$$ cuốn sách tiếng Anh khác nhau, $$4$$ cuốn sách tiếng Trung khác nhau, $$3$$ cuốn sách toán khác nhau. Bây giờ muốn lấy ra $$2$$ cuốn, và không được lấy cùng một môn, có tổng cộng bao nhiêu cách lấy khác nhau.",
+        "kc_routes": [
+            "Mở rộng tư duy----Mô-đun đếm----Nguyên tắc cộng và nhân----Tổng hợp nguyên lý cộng và nhân",
+            "Mở rộng tư duy----Mô-đun đếm----Nguyên tắc cộng và nhân----Nguyên tắc nhân----Nối đồ vật"
+        ],
+        "answer": [
+            "$$26$$"
+        ],
+        "analysis": "Chia thành ba trường hợp: Trường hợp $$1$$: Lấy sách tiếng Anh và tiếng Trung có: $$2\\times 4=8$$ (cách); Trường hợp $$2$$: Lấy sách tiếng Anh và toán có: $$2\\times 3=6$$ (cách); Trường hợp $$3$$: Lấy sách tiếng Trung và toán có: $$3\\times 4=12$$ (cách); Vậy tổng cộng có $$8+6+12=26$$ (cách) lấy.",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "2": {
+        "content": "Dùng $$5$$ màu khác nhau để tô màu các hình bên dưới, yêu cầu các vùng liền kề (hai vùng có cạnh chung được gọi là liền kề) phải được tô bằng các màu khác nhau. Nếu có thể sử dụng lại màu, thì có tổng cộng bao nhiêu cách tô màu khác nhau.\n question_2-image_0",
+        "kc_routes": [
+            "Mở rộng tư duy của bạn ---- Mô-đun đếm ---- Nguyên lý cộng và nhân ---- Bài toán tô màu và đếm"
+        ],
+        "answer": [
+            "$$180$$"
+        ],
+        "analysis": "Đầu tiên, xét vùng $$A$$, có $$5$$ lựa chọn, tiếp theo vùng $$B$$ có $$4$$ lựa chọn, vùng $$C$$ có $$3$$ lựa chọn, vùng $$D$$ có $$3$$ lựa chọn, vì vậy có tổng cộng $$5\\times4\\times3\\times3=180$$ (cách).",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "3": {
+        "content": "Dùng bốn màu để tô các vùng như trong hình, yêu cầu các vùng liền kề phải tô màu khác nhau. Hỏi có bao nhiêu cách tô màu khác nhau.\n question_3-image_0",
+        "kc_routes": [
+            "Mở rộng tư duy của bạn ---- Mô-đun đếm ---- Nguyên lý cộng và nhân ---- Bài toán nhuộm và đếm"
+        ],
+        "answer": [
+            "$$24$$"
+        ],
+        "analysis": "Bước một: Tô màu cho $$A$$, có $$4$$ cách chọn.\nBước hai: Tô màu cho $$B$$, vì $$B$$ không được cùng màu với $$A$$, nên $$B$$ có $$3$$ cách chọn.\nBước ba: Tô màu cho $$C$$, vì $$C$$ không được cùng màu với $$A$$ và $$B$$, nên $$C$$ có $$2$$ cách chọn.\nTheo nguyên lý nhân, dùng $$4$$ màu để tô màu các vùng có $$4\\times 3\\times 2=24$$ cách khác nhau.",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "4": {
+        "content": "Đặt câu với các từ cho trong bảng dưới đây. Mỗi câu phải bao gồm một người, một phương tiện và một điểm đến. Bạn có thể đặt một câu khác được không?Bố tôi bay tới Bắc Kinh, mẹ tôi bắt tàu đến Lhasa, còn tôi bắt ô tô đến Đài Bắc.",
+        "kc_routes": [
+            "Mở rộng tư duy----Mô-đun đếm----Nguyên tắc cộng và nhân----Nguyên tắc nhân----tổ hợp số lượng đồ vật"
+        ],
+        "answer": [
+            "$$27$$"
+        ],
+        "analysis": "$$3\\times 3\\times 3=27$$个．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "5": {
+        "content": "Hình bên dưới là một hình nấm bị biến dạng, được chia thành sáu vùng. Bây giờ chúng ta cần tô màu nó bằng bốn màu, yêu cầu hai vùng liền kề (hai vùng có cạnh chung được gọi là liền kề) phải được tô bằng các màu khác nhau. Nếu màu có thể được sử dụng lặp lại, thì có tổng cộng các phương pháp tô màu khác nhau. question_5-image_0",
+        "kc_routes": [
+            "Mở rộng tư duy của bạn ---- Mô-đun đếm ---- Nguyên lý cộng và nhân ---- Bài toán nhuộm và đếm"
+        ],
+        "answer": [
+            "$$432$$"
+        ],
+        "analysis": "Bước 1: Tô màu vùng $$D$$ trước, có $$4$$ màu để chọn; Bước 2: Tô màu vùng $$A$$ trước, có $$3$$ màu để chọn; Bước 3: Tô màu vùng $$B$$ trước, có $$2$$ màu để chọn; Bước 4: Tô màu vùng $$C$$ trước, có $$2$$ màu để chọn; Bước 5: Tô màu vùng $$E$$ trước, có $$3$$ màu để chọn; Bước 6: Tô màu vùng $$F$$ trước, có $$3$$ màu để chọn; Theo nguyên lý đếm phân bước, có tổng cộng: $$4\\times 3\\times 2\\times 2\\times 3\\times 3=432$$（phương pháp） khác nhau để tô màu.",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "6": {
+        "content": "Tiểu Mỹ mua hai bộ quần áo và hai chiếc váy tại siêu thị. Hãy giúp Tiểu Mỹ sắp xếp các cách mặc khác nhau.\n question_6-image_0",
+        "kc_routes": [
+            "Mở rộng tư duy----Mô-đun đếm----Nguyên tắc cộng và nhân----Nguyên tắc nhân----Nối đồ vật"
+        ],
+        "answer": [
+            "$$4$$"
+        ],
+        "analysis": "$$2\\times2=4$$（cách），liệt kê cũng có thể được 4（cách）",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "7": {
+        "content": "Người đưa thư gửi thư từ làng $$A$$ đến làng $$B$$ có $$5$$ con đường, từ làng $$B$$ đến làng $$C$$ có $$6$$ con đường, vậy người đưa thư từ làng $$A$$ qua làng $$B$$ đến làng $$C$$ có bao nhiêu cách đi khác nhau.",
+        "kc_routes": [
+            "Mở rộng tư duy ---- Mô-đun đếm ---- Nguyên lý cộng và nhân ---- Nguyên tắc nhân ---- Bài toán so khớp tuyến đường"
+        ],
+        "answer": [
+            "$$30$$"
+        ],
+        "analysis": "Thực hiện phép nhân từng bước, $$5\\times 6=30$$（cách）．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "8": {
+        "content": "Hình vẽ bên là mặt bên của một cầu thang đồ chơi. Biết mỗi bậc thang rộng $$10$$ cm, cao $$8$$ cm. Chu vi của mặt bên cầu thang này là bao nhiêu cm?\n question_8-image_0",
+        "kc_routes": [
+            "Mở rộng tư duy----Mô-đun hình học----Loại tuyến tính----Ý tưởng và phương pháp hình học----Dịch ý tưởng hình học"
+        ],
+        "answer": [
+            "$$252$$"
+        ],
+        "analysis": "Phương pháp dịch chuyển: $$\\left( 10\\times 7+8\\times 7 \\right)\\times 2=252$$（cm）．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "9": {
+        "content": "Như hình bên dưới, một hình chữ nhật lớn được chia thành bốn hình chữ nhật nhỏ, trong đó chu vi của $$2$$ hình chữ nhật nhỏ lần lượt là $$20$$, $$24$$ centimet. Các giá trị này đã được đánh dấu bên trong hình. Hỏi chu vi của hình chữ nhật lớn là bao nhiêu centimet.\n question_9-image_0",
+        "kc_routes": [
+            "Mở rộng tư duy----Mô-đun hình học----Loại tuyến tính----Ý tưởng và phương pháp hình học----Dịch ý tưởng hình học"
+        ],
+        "answer": [
+            "$$44$$"
+        ],
+        "analysis": "Theo phương pháp dịch chuyển, chu vi của hình chữ nhật lớn $$=20+24=44$$．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "10": {
+        "content": "Như hình vẽ, đoạn thẳng $$a=12$$ cm, $$b=9$$ cm, $$c=4$$ cm, $$d=6$$ cm, chu vi của hình là bao nhiêu cm.\n question_10-image_0",
+        "kc_routes": [
+            "Mở rộng tư duy----Mô-đun hình học----Hình tuyến tính----Nhận thức đồ họa----Tứ giác không đều----Loại bẫy có hình dạng không đều tìm chu vi"
+        ],
+        "answer": [
+            "$$50$$"
+        ],
+        "analysis": "Phương pháp đánh dấu, $$(12+9+4)\\times 2=50$$（cm）．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    }
+}
