@@ -1,0 +1,135 @@
+{
+    "0": {
+        "content": "Trường có 4 lớp sở thích: múa, hát, cờ vây và vẽ tranh.Ba đứa trẻ Xiaoyu, Xiaoming và Xiaoli đã sẵn sàng đăng ký. Mỗi người trong số họ chỉ có thể đăng ký một lớp và mỗi lớp là khác nhau. Có nhiều phương pháp đăng ký khác nhau.",
+        "kc_routes": [
+            "Mở rộng tư duy của bạn ---- mô-đun đếm ---- nguyên tắc cộng và nhân ---- nguyên tắc nhân ---- các loại khác trong nguyên tắc nhân"
+        ],
+        "answer": [
+            "$$24$$"
+        ],
+        "analysis": "小宇先选，有$$4$$种，接下来小明选，有$$3$$种，最后小丽选，有$$2$$种，所以一共有$$4\\times3\\times2=24$$（种）．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "1": {
+        "content": "书架上有 $$2$$ 本不同的英语书，$$4$$ 本不同的语文书，$$3$$ 本不同的数学书． 现在要从中取出$$2$$ 本，而且不能是同一科的，一共有种不同取法．",
+        "kc_routes": [
+            "Mở rộng tư duy----Mô-đun đếm----Nguyên tắc cộng và nhân----Tổng hợp nguyên lý cộng và nhân",
+            "Mở rộng tư duy----Mô-đun đếm----Nguyên tắc cộng và nhân----Nguyên tắc nhân----Nối đồ vật"
+        ],
+        "answer": [
+            "$$26$$"
+        ],
+        "analysis": "先分成三类：情况 $$1$$：取的是英语和语文书时有：$$2\\times 4=8$$（种）；情况$$2$$：取的是英语和数学书时有：$$2\\times 3=6$$（种）；情况 $$3$$：取的是语文和数学书时有：$$3\\times 4=12$$（种）；所以一共有$$8+6+12=26$$（种）取法．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "2": {
+        "content": "用$$5$$种不同的颜色给下面的图形染色，要求相邻的区域（有公共边的两区域称为相邻）染成不同的颜色．如果颜色能重复使用，则共有种不同的染色方法．\n question_2-image_0",
+        "kc_routes": [
+            "Mở rộng tư duy của bạn ---- Mô-đun đếm ---- Nguyên lý cộng và nhân ---- Bài toán nhuộm và đếm"
+        ],
+        "answer": [
+            "$$180$$"
+        ],
+        "analysis": "先考虑$$A$$区，有$$5$$种选择，接下来$$B$$区有$$4$$种，$$C$$区有$$3$$种，$$D$$区有$$3$$种，所以共有$$5\\times4\\times3\\times3=180$$（种）．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "3": {
+        "content": "用四种颜色去涂如图所示的三块区域，要求相邻的区域涂不同的颜色，那么共有种不同的涂法.\n question_3-image_0",
+        "kc_routes": [
+            "Mở rộng tư duy của bạn ---- Mô-đun đếm ---- Nguyên lý cộng và nhân ---- Bài toán nhuộm và đếm"
+        ],
+        "answer": [
+            "$$24$$"
+        ],
+        "analysis": "第一步：给$$A$$染色，有$$4$$种颜色可选．\n第二步：给$$B$$染色，由于$$B$$不能与$$A$$同色，所以$$B$$有$$3$$种颜色可选．\n第三步：给$$C$$染色，由于$$C$$不能与$$A$$、$$B$$同色，所以$$C$$有$$2$$种颜色可选．\n根据分步计数的乘法原理，用$$4$$种颜色给区域染色共有$$4\\times 3\\times 2=24$$（种）不同的染色方法．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "4": {
+        "content": "Đặt câu với các từ cho trong bảng dưới đây. Mỗi câu phải bao gồm một người, một phương tiện và một điểm đến. Bạn có thể đặt một câu khác được không?Bố tôi bay tới Bắc Kinh, mẹ tôi bắt tàu đến Lhasa, còn tôi bắt ô tô đến Đài Bắc.",
+        "kc_routes": [
+            "Mở rộng tư duy----Mô-đun đếm----Nguyên tắc cộng và nhân----Nguyên tắc nhân----tổ hợp số lượng đồ vật"
+        ],
+        "answer": [
+            "$$27$$"
+        ],
+        "analysis": "$$3\\times 3\\times 3=27$$个．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "5": {
+        "content": "下图是一个变形的蘑菇，一共分为六块区域．现在要用四种颜色对其染色，要求相邻的两块区域（有公共边的两块区域称为相邻）染成不同的颜色．如果颜色能反复使用，那么一共有种不同的染色方法． question_5-image_0",
+        "kc_routes": [
+            "Mở rộng tư duy của bạn ---- Mô-đun đếm ---- Nguyên lý cộng và nhân ---- Bài toán nhuộm và đếm"
+        ],
+        "answer": [
+            "$$432$$"
+        ],
+        "analysis": "第一步：先染$$D$$区域，有$$4$$种颜色可以选；第二步：染$$A$$区域，有$$3$$种颜色可以选；第三步：染$$B$$区域，有$$2$$种颜色可以选第四步：染$$C$$区域，有$$2$$种颜色可以选；第五步：染$$E$$区域，有$$3$$种颜色可以选；第六步：染$$F$$区域，有$$3$$种颜色可以选；根据分步计数原理，共有：$$4\\times 3\\times 2\\times 2\\times 3\\times 3=432$$（种）不同的染色方法．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "6": {
+        "content": "小美在超市买了两件衣服，两条裙子．请帮小美安排一下，有种不同的穿法．\n question_6-image_0",
+        "kc_routes": [
+            "Mở rộng tư duy----Mô-đun đếm----Nguyên tắc cộng và nhân----Nguyên tắc nhân----Nối đồ vật"
+        ],
+        "answer": [
+            "$$4$$"
+        ],
+        "analysis": "$$2\\times2=4$$（种），枚举也可得4（种）",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "7": {
+        "content": "邮递员投递邮件由$$A$$村去$$B$$村的道路有$$5$$条，由$$B$$村去$$C$$村的道路有$$6$$条，那么邮递员从$$A$$村经$$B$$村去$$C$$村，共有种不同的走法．",
+        "kc_routes": [
+            "Mở rộng tư duy ---- Mô-đun đếm ---- Nguyên lý cộng và nhân ---- Nguyên tắc nhân ---- Bài toán so khớp tuyến đường"
+        ],
+        "answer": [
+            "$$30$$"
+        ],
+        "analysis": "分步做乘法，$$5\\times 6=30$$（种）．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "8": {
+        "content": "下图是一个玩具楼梯的侧面，已知每级台阶宽$$10$$厘米，高$$8$$厘米，这个楼梯侧面的周长是厘米．\n question_8-image_0",
+        "kc_routes": [
+            "Mở rộng tư duy----Mô-đun hình học----Loại tuyến tính----Ý tưởng và phương pháp hình học----Dịch ý tưởng hình học"
+        ],
+        "answer": [
+            "$$252$$"
+        ],
+        "analysis": "平移法：$$\\left( 10\\times 7+8\\times 7 \\right)\\times 2=252$$（厘米）．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "9": {
+        "content": "如下图所示，一个大长方形被分割为四个小长方形，其中$$2$$个小长方形的周长分别为$$20$$、$$24$$厘米，在图中已将此数值标记在它的内部，请问大长方形的周长是厘米．\n question_9-image_0",
+        "kc_routes": [
+            "Mở rộng tư duy----Mô-đun hình học----Loại tuyến tính----Ý tưởng và phương pháp hình học----Dịch ý tưởng hình học"
+        ],
+        "answer": [
+            "$$44$$"
+        ],
+        "analysis": "根据平移法，大长方形的周长$$=20+24=44$$．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    },
+    "10": {
+        "content": "如图，线段$$a=12$$厘米，$$b=9$$厘米，$$c=4$$厘米，$$d=6$$厘米，图形的周长是厘米．\n question_10-image_0",
+        "kc_routes": [
+            "Mở rộng tư duy----Mô-đun hình học----Hình tuyến tính----Nhận thức đồ họa----Tứ giác không đều----Loại bẫy có hình dạng không đều tìm chu vi"
+        ],
+        "answer": [
+            "$$50$$"
+        ],
+        "analysis": "标向法，$$(12+9+4)\\times 2=50$$（厘米）．",
+        "type": "điền vào chỗ trống",
+        "options": {}
+    }
+}

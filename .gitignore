@@ -7,34 +7,58 @@ __pycache__/
 *.so
 
 # Distribution / packaging
+<<<<<<< HEAD
 bin/
 build/
 develop-eggs/
 dist/
 eggs/
+=======
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+.Python
+eggs/
+.eggs/
+>>>>>>> 3f7eb96 (Extract_feature)
 lib/
+downloads/
 lib64/
+.eggs/
 parts/
 sdist/
 var/
+<<<<<<< HEAD
 wheels/
+=======
+>>>>>>> 3f7eb96 (Extract_feature)
 *.egg-info/
 .installed.cfg
 *.egg
 
+<<<<<<< HEAD
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so may be deleted later.
 *.manifest
 *.spec
+.nox/
 
+=======
+>>>>>>> 3f7eb96 (Extract_feature)
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
 
 # Unit test / coverage reports
 htmlcov/
-.tox/
+# Jupyter Notebook checkpoints
+<<<<<<< HEAD
+=======
+.nox/
+>>>>>>> 3f7eb96 (Extract_feature)
 .coverage
 .coverage.*
 .cache
@@ -42,8 +66,10 @@ nosetests.xml
 coverage.xml
 *.cover
 .hypothesis/
+.idea/
 .pytest_cache/
 
+<<<<<<< HEAD
 # Translations
 *.mo
 *.pot
@@ -66,11 +92,15 @@ docs/_build/
 target/
 
 # Jupyter Notebook
+=======
+# Jupyter Notebook checkpoints
+>>>>>>> 3f7eb96 (Extract_feature)
 .ipynb_checkpoints
 
 # pyenv
 .python-version
 
+<<<<<<< HEAD
 # celery beat schedule file
 celerybeat-schedule
 
@@ -110,3 +140,59 @@ cython_debug/
 .idea/
 
 .venv
+=======
+# mypy
+.mypy_cache/
+.dmypy.json
+
+# VS Code
+.vscode/
+
+# MacOS
+.DS_Store
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Data files
+*.csv
+*.tsv
+*.parquet
+*.h5
+*.db
+*.sqlite3
+*.log
+*.bak
+
+# Model files
+*.pt
+*.pth
+*.h5
+*.ckpt
+*.joblib
+*.pkl
+*.sav
+
+# Environment files
+.env
+.venv/
+venv/
+env/
+ENV/
+
+# Other
+*.swp
+*.swo
+*~
+
+# Ignore checkpoints and outputs
+**/checkpoints/
+**/outputs/
+**/logs/
+
+# Ignore large data and model folders
+**/llm_checkpoints/
+**/images/
+**/embeddings/
+>>>>>>> 3f7eb96 (Extract_feature)
