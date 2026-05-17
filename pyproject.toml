@@ -4,7 +4,16 @@ version = "0.1.0"
 description = "Data and notebook workflow for intelligent testing research"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "alembic>=1.18.4",
+    "dishka>=1.10.1",
+    "fastapi>=0.136.1",
+    "pandas>=3.0.3",
+    "psycopg2-binary>=2.9.12",
+    "pydantic-settings>=2.14.1",
+    "python-dotenv>=1.2.2",
+    "uvicorn>=0.47.0",
+]
 
 [project.scripts]
 intelligent-testing = "intelligent_testing.main:main"
@@ -13,8 +22,21 @@ intelligent-testing = "intelligent_testing.main:main"
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
+
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["app*"]
+
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.12",
+    "ty>=0.0.29",
+]
+
+[tool.ruff]
+exclude = ["notebooks"]
+

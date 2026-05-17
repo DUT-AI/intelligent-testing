@@ -55,10 +55,7 @@ pip-delete-this-directory.txt
 # Unit test / coverage reports
 htmlcov/
 # Jupyter Notebook checkpoints
-<<<<<<< HEAD
-=======
 .nox/
->>>>>>> 3f7eb96 (Extract_feature)
 .coverage
 .coverage.*
 .cache
@@ -69,7 +66,6 @@ coverage.xml
 .idea/
 .pytest_cache/
 
-<<<<<<< HEAD
 # Translations
 *.mo
 *.pot
@@ -92,15 +88,12 @@ docs/_build/
 target/
 
 # Jupyter Notebook
-=======
 # Jupyter Notebook checkpoints
->>>>>>> 3f7eb96 (Extract_feature)
 .ipynb_checkpoints
 
 # pyenv
 .python-version
 
-<<<<<<< HEAD
 # celery beat schedule file
 celerybeat-schedule
 
@@ -140,7 +133,6 @@ cython_debug/
 .idea/
 
 .venv
-=======
 # mypy
 .mypy_cache/
 .dmypy.json
@@ -195,4 +187,6 @@ ENV/
 **/llm_checkpoints/
 **/images/
 **/embeddings/
->>>>>>> 3f7eb96 (Extract_feature)
+
+
+data/Official
