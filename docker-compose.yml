@@ -3,20 +3,17 @@ version: '3.8'
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: postgres_db
+    container_name: intelligent-testing-db
     restart: unless-stopped
     ports:
-      # Maps the external port from .env (defaults to 5432) to the default PostgreSQL internal port 5432
       - "${POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      # Persists database data across container restarts/removals
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      # Periodically checks if the PostgreSQL database is ready to accept connections
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
@@ -24,6 +21,5 @@ services:
       start_period: 10s
 
 volumes:
-  # Named volume for persistent data storage
   postgres_data:
     driver: local
