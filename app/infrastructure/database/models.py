@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 from sqlalchemy import ForeignKey, Integer, String, Text, JSON, DateTime, Float, Boolean
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import ARRAY
 
 
 class Base(DeclarativeBase):
@@ -109,6 +110,7 @@ class Question(Base):
     options: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     concept_ids: Mapped[Optional[List[int]]] = mapped_column(JSON, nullable=True)
     option_count: Mapped[int] = mapped_column(Integer, default=0)
+    embedding: Mapped[Optional[List[float]]] = mapped_column(ARRAY(Float), nullable=True)
 
     features: Mapped[Optional["QuestionFeatures"]] = relationship(
         back_populates="question", cascade="all, delete-orphan"

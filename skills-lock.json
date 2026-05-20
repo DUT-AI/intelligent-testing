@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "pytorch-lightning": {
+      "source": "davila7/claude-code-templates",
+      "sourceType": "github",
+      "skillPath": "cli-tool/components/skills/ai-research/distributed-training-pytorch-lightning/SKILL.md",
+      "computedHash": "ca5ca05097e4ad9cc07db0a5f314303d751c447a78b80163058c75d586a7c9e9"
+    }
+  }
+}
