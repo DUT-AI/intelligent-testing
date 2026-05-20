@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
+from datetime import datetime
+from sqlalchemy import ForeignKey, Integer, String, Text, JSON, DateTime, Float, Boolean
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import ForeignKey, String, Text, JSON
 
 
 class Base(DeclarativeBase):
@@ -82,6 +83,17 @@ class QuestionDomain(Base):
     keywords: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class KcMap(Base):
+    """
+    Represents knowledge concept mappings from 'kc_maps.json'
+    """
+
+    __tablename__ = "kc_maps"
+
+    concept_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class Question(Base):
     """
     Represents detailed math questions from 'question_full.json'
@@ -91,13 +103,12 @@ class Question(Base):
 
     id: Mapped[str] = mapped_column(String(50), primary_key=True, index=True)
     content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    kc_routes: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
-    sa: Mapped[Optional[List[str]]] = mapped_column(
-        JSON, name="answer", nullable=True
-    )  # explicitly name sa as 'answer'
+    answer: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
     analysis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     options: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    concept_ids: Mapped[Optional[List[int]]] = mapped_column(JSON, nullable=True)
+    option_count: Mapped[int] = mapped_column(Integer, default=0)
 
     features: Mapped[Optional["QuestionFeatures"]] = relationship(
         back_populates="question", cascade="all, delete-orphan"
@@ -177,3 +188,76 @@ class StudentSequence(Base):
     is_repeat: Mapped[str] = mapped_column(Text)
     cidxs: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     selectmasks: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+class ExamSession(Base):
+    """
+    Represents an active or completed adaptive testing session for a student.
+    Quản lý thông tin tổng quan của một lượt thi thích ứng.
+    """
+
+    __tablename__ = "exam_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    
+    # Khóa ngoại liên kết trực tiếp với bảng UserORM (id kiểu int)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    
+    start_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    end_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    total_questions: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Năng lực tổng quát cuối cùng chốt được khi bài thi kết thúc (Đạt điều kiện dừng)
+    final_theta: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    
+    # Trạng thái để kiểm soát xem bài thi đã đóng hay chưa
+    is_completed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Relationships
+    user: Mapped["UserORM"] = relationship()
+    interactions: Mapped[List["ExamInteraction"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+
+
+class ExamInteraction(Base):
+    """
+    Represents a real-time single question interaction within an adaptive testing session.
+    Ghi vết chi tiết từng câu hỏi ngay khi thí sinh vừa bấm nộp câu trả lời.
+    """
+
+    __tablename__ = "exam_interactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    
+    # Liên kết với phiên thi tương ứng
+    session_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("exam_sessions.id", ondelete="CASCADE"), index=True
+    )
+    
+    # Liên kết với ngân hàng câu hỏi (id kiểu String(50) khớp với bảng Question)
+    question_id: Mapped[str] = mapped_column(
+        String(50), ForeignKey("questions.id", ondelete="RESTRICT"), index=True
+    )
+    
+    # Thứ tự bước làm bài trong phiên thi (Ví dụ: Câu số 1, Câu số 2, Câu số 3...)
+    step_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    
+    # Kết quả trả lời thực tế của thí sinh cho câu này (Đúng = True / Sai = False)
+    is_correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    
+    # Số giây thí sinh thực sự bỏ ra để giải câu hỏi này (dùng để tính phạt/thưởng thời gian)
+    response_time_sec: Mapped[int] = mapped_column(Integer, nullable=False)
+    
+    # Mốc thời gian chính xác khi hệ thống nhận được câu trả lời này
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    
+    # NĂNG LỰC ƯỚC LƯỢNG NGAY TẠI THỜI ĐIỂM NÀY
+    # Trường này cực kỳ quan trọng: Lưu lại Theta sau khi thuật toán chạy xong ở câu này.
+    # Dùng để Frontend vẽ biểu đồ tiến độ và Backend check xem biến động Delta Theta đã < ngưỡng để dừng bài chưa.
+    theta_after: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Relationships
+    session: Mapped["ExamSession"] = relationship(back_populates="interactions")
+    question: Mapped["Question"] = relationship()
