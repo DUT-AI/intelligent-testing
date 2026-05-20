@@ -2,7 +2,24 @@ import os
 import sys
 import json
 import pandas as pd
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
 
+load_dotenv()
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
+print("URL DATABASE LÀ:", SQLALCHEMY_DATABASE_URL) # Thêm dòng này để kiểm tra
+def custom_json_serializer(obj):
+    return json.dumps(obj, ensure_ascii=False)
+
+# 4. Khởi tạo engine
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    json_serializer=custom_json_serializer 
+)
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 # Add project root directory to python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -12,6 +29,7 @@ from app.infrastructure.database.models import (
     SyntacticComplexity,
     VocabDifficulty,
     QuestionDomain,
+    KcMap,
     Question,
     QuestionFeatures,
     LLMMisconception,
@@ -19,6 +37,43 @@ from app.infrastructure.database.models import (
 )
 
 DATA_DIR = "data/Official"
+QUESTIONS_FINAL_FILE = os.path.join("notebooks", "questions_final_db.json")
+KC_MAPS_FILE = os.path.join(
+    "data",
+    "raw",
+    "XES3G5M",
+    "XES3G5M",
+    "metadata",
+    "translation",
+    "kc_maps.json",
+)
+
+
+def normalize_options(raw_options):
+    if not raw_options:
+        return {}
+
+    options = raw_options
+    if isinstance(options, str):
+        try:
+            options = json.loads(options)
+        except json.JSONDecodeError:
+            return {}
+
+    if not isinstance(options, dict):
+        return {}
+
+    normalized = {}
+    for key, value in options.items():
+        if isinstance(value, str) and "\\u" in value:
+            try:
+                value = value.encode("utf-8").decode("unicode_escape")
+            except UnicodeDecodeError:
+                pass
+
+        normalized[str(key)] = value
+
+    return normalized
 
 
 def load_operators(session):
@@ -131,12 +186,48 @@ def load_question_domains(session):
         print("ℹ️ Question domains already loaded.")
 
 
-def load_questions(session):
-    print("⏳ Loading questions from question_full.json...")
-    filepath = os.path.join(DATA_DIR, "question_full.json")
+def load_kc_maps(session):
+    print("⏳ Loading knowledge concept maps from kc_maps.json...")
+    filepath = KC_MAPS_FILE
     if not os.path.exists(filepath):
         print(f"⚠️ {filepath} not found, skipping.")
         return
+
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    existing_ids = set(r[0] for r in session.query(KcMap.concept_id).all())
+    objects = []
+    for raw_id, content in data.items():
+        try:
+            concept_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+
+        if concept_id in existing_ids:
+            continue
+
+        objects.append(KcMap(concept_id=concept_id, content=str(content).strip()))
+
+    if objects:
+        session.bulk_save_objects(objects)
+        session.commit()
+        print(f"✅ Loaded {len(objects)} knowledge concept maps successfully.")
+    else:
+        print("ℹ️ Knowledge concept maps already loaded.")
+
+def load_questions(session):
+    print("⏳ Loading questions from questions_final_db.json...")
+    filepath = QUESTIONS_FINAL_FILE
+    
+    if not os.path.exists(filepath):
+        fallback = os.path.join(DATA_DIR, "question_full.json")
+        if os.path.exists(fallback):
+            print("ℹ️ questions_final_db.json not found, falling back to question_full.json.")
+            filepath = fallback
+        else:
+            print(f"⚠️ {QUESTIONS_FINAL_FILE} not found, skipping.")
+            return
 
     with open(filepath, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -145,36 +236,56 @@ def load_questions(session):
     existing_ids = set(r[0] for r in session.query(Question.id).all())
 
     questions_to_insert = []
+    questions_to_update = []
+    
     for q_id, q_data in data.items():
-        if q_id in existing_ids:
-            continue
+        q_id_str = str(q_id)
+        options = normalize_options(q_data.get("options"))
+        option_count = q_data.get("option_count")
+        
+        if option_count is None and isinstance(options, dict):
+            option_count = len(options)
 
-        questions_to_insert.append(
-            Question(
-                id=str(q_id),
-                content=q_data.get("content"),
-                kc_routes=q_data.get("kc_routes"),
-                sa=q_data.get("answer"),  # mapped to sa
-                analysis=q_data.get("analysis"),
-                type=q_data.get("type"),
-                options=q_data.get("options"),
-            )
-        )
+        payload = {
+            "id": q_id_str,
+            "content": q_data.get("content"),
+            "answer": q_data.get("answer"),
+            "analysis": q_data.get("analysis"),
+            "type": q_data.get("type"),
+            "options": options,
+            "concept_ids": q_data.get("concept_ids"),
+            "option_count": int(option_count or 0),
+        }
 
+        if q_id_str in existing_ids:
+            questions_to_update.append(payload)
+        else:
+            questions_to_insert.append(Question(**payload))
+
+    # --- KHỐI INSERT (Giữ nguyên, bạn làm rất tốt) ---
     if questions_to_insert:
-        # Batch insert in chunks of 1000
         batch_size = 1000
         for i in range(0, len(questions_to_insert), batch_size):
             chunk = questions_to_insert[i : i + batch_size]
             session.bulk_save_objects(chunk)
             session.commit()
-            print(
-                f"   • Loaded questions {i + 1} to {min(i + batch_size, len(questions_to_insert))}..."
-            )
+            print(f"   • Loaded questions {i + 1} to {min(i + batch_size, len(questions_to_insert))}...")
         print(f"✅ Loaded {len(questions_to_insert)} new questions successfully.")
     else:
         print("ℹ️ All questions already loaded.")
 
+    # --- KHỐI UPDATE ĐƯỢC LÀM LẠI ĐỂ CHẠY NHANH HƠN ---
+    if questions_to_update:
+        batch_size = 1000
+        for i in range(0, len(questions_to_update), batch_size):
+            chunk = questions_to_update[i : i + batch_size]
+            
+            # SỬA LỖI 2: Dùng bulk_update_mappings thay vì vòng lặp query update từng dòng
+            session.bulk_update_mappings(Question, chunk)
+            
+            session.commit()
+            print(f"   • Updated questions {i + 1} to {min(i + batch_size, len(questions_to_update))}...")
+        print(f"✅ Updated {len(questions_to_update)} existing questions successfully.")
 
 def load_question_features(session):
     print("⏳ Loading question features from full_features.csv...")
@@ -347,6 +458,7 @@ def main():
         load_syntactic_complexity(session)
         load_vocab_difficulty(session)
         load_question_domains(session)
+        load_kc_maps(session)
         load_questions(session)
         load_question_features(session)
         load_llm_misconceptions(session)
