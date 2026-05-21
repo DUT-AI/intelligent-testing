@@ -2,11 +2,18 @@
 # DEVELOPMENT TOOLING AND ENVIRONMENT MANAGEMENT
 # ==============================================================================
 
-.PHONY: help up down run migrate migration lint format check-types
+.PHONY: help up down run migrate migration lint format check-types train-base train-optimized eval eval-ckpt compare test clean
+
+# Default variables for model training/evaluation
+EPOCHS ?= 50
+BATCH_SIZE ?= 32
+MAX_SEQ_LEN ?= 150
+CHECKPOINT ?= ""
+RESUME ?= ""
 
 help: ## Show this help message
 	@echo "Available commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 # --- Docker Environment ---
 up: ## Start the PostgreSQL database container
@@ -51,3 +58,30 @@ check-types: ## Check Python source files for type errors using ty
 run: ## Run the local FastAPI development server
 	@echo "Starting FastAPI server..."
 	uv run uvicorn app.main:app --reload
+
+train-base: ## Train the baseline Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=32 MAX_SEQ_LEN=150 RESUME=<ckpt_path>)
+	uv run python3 scripts/train_neural_cat.py --model_type base --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)"
+
+train-optimized: ## Train the optimized Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=32 MAX_SEQ_LEN=150 RESUME=<ckpt_path>)
+	uv run python3 scripts/train_neural_cat.py --model_type optimized --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)"
+
+eval: ## Evaluate the best checkpoint (auto-selected lowest validation loss)
+	uv run python3 scripts/evaluate_neural_cat.py
+
+eval-ckpt: ## Evaluate a specific checkpoint (Usage: make eval-ckpt CHECKPOINT=<path_to_ckpt>)
+	@if [ -z "$(CHECKPOINT)" ]; then \
+		echo "Error: Please specify CHECKPOINT=<path_to_ckpt>"; \
+		exit 1; \
+	fi
+	uv run python3 scripts/evaluate_neural_cat.py --checkpoint_path $(CHECKPOINT)
+
+compare: ## Compare all evaluated models and update reports
+	uv run python3 scripts/compare_models.py
+
+test: ## Run unit tests for both base and optimized models
+	PYTHONPATH=src uv run python3 tests/test_neural_cat.py
+	PYTHONPATH=src uv run python3 tests/test_neural_cat_optimized.py
+
+clean: ## Remove temporary caches and pytest directory
+	rm -rf .pytest_cache
+	find . -type d -name "__pycache__" -exec rm -r {} +

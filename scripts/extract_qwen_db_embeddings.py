@@ -67,6 +67,7 @@ def main():
     
     # SentenceTransformer handles the device and loading automatically
     model = SentenceTransformer(model_name, device=device)
+    model.max_seq_length = 1024
     
     # 4. Generate embeddings
     print("--- Generating Qwen3 Embeddings ---")

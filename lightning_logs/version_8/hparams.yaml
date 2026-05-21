@@ -1,0 +1,12 @@
+K: 1175
+alpha_max: 0.5
+d_embedding: 1024
+d_features: 22
+d_h: 128
+d_time: 32
+k_warmup: 5
+lambda_reg: 0.1
+lr: 0.001
+max_seq_len: 150
+nhead: 4
+num_layers: 2
