@@ -82,7 +82,8 @@ class NeuralCATEngineOptimized(nn.Module):
         self.predictor = NeuralCATPredictor(d_x=self.d_x, d_h=d_h)
 
     def forward(self, x_emb: torch.Tensor, x_feat: torch.Tensor, r: torch.Tensor, 
-                T_time: torch.Tensor, Q: torch.Tensor, padding_mask: torch.Tensor | None = None):
+                T_time: torch.Tensor, Q: torch.Tensor, padding_mask: torch.Tensor | None = None,
+                g_priors: torch.Tensor | None = None):
         """
         Args:
             x_emb: Sequence of raw text question embeddings, shape (B, T, d_embedding)
@@ -91,6 +92,7 @@ class NeuralCATEngineOptimized(nn.Module):
             T_time: Sequence of response times, shape (B, T)
             Q: Sequence of binary Q-matrices, shape (B, T, K)
             padding_mask: Boolean mask indicating valid steps (B, T)
+            g_priors: Prior guessing rates, shape (B, T)
         Returns:
             P: Predictions for response sequence, shape (B, T)
             g: Guessing parameters, shape (B, T)
@@ -102,7 +104,7 @@ class NeuralCATEngineOptimized(nn.Module):
         x = self.fusion(x_emb, x_feat)  # (B, T, d_x)
         
         # 2. Block 1: 4PL Input Refiner
-        r_soft, g, s = self.refiner(x, r)
+        r_soft, g, s = self.refiner(x, r, g_priors)
         
         # 3. Block 2: Input Embedding Module
         I = self.embedding(x, T_time, r_soft)

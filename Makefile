@@ -2,14 +2,15 @@
 # DEVELOPMENT TOOLING AND ENVIRONMENT MANAGEMENT
 # ==============================================================================
 
-.PHONY: help up down run migrate migration lint format check-types train-base train-optimized eval eval-ckpt compare test clean
+.PHONY: help up down run migrate migration lint format check-types train-base train-optimized eval eval-ckpt compare test plot clean
 
 # Default variables for model training/evaluation
 EPOCHS ?= 50
-BATCH_SIZE ?= 32
-MAX_SEQ_LEN ?= 150
+BATCH_SIZE ?= 20
+MAX_SEQ_LEN ?= 100
 CHECKPOINT ?= ""
-RESUME ?= ""
+RESUME ?= 
+PATIENCE ?= 10
 
 help: ## Show this help message
 	@echo "Available commands:"
@@ -59,11 +60,11 @@ run: ## Run the local FastAPI development server
 	@echo "Starting FastAPI server..."
 	uv run uvicorn app.main:app --reload
 
-train-base: ## Train the baseline Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=32 MAX_SEQ_LEN=150 RESUME=<ckpt_path>)
-	uv run python3 scripts/train_neural_cat.py --model_type base --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)"
+train-base: ## Train the baseline Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=32 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10)
+	uv run python3 scripts/train_neural_cat.py --model_type base --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE)
 
-train-optimized: ## Train the optimized Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=32 MAX_SEQ_LEN=150 RESUME=<ckpt_path>)
-	uv run python3 scripts/train_neural_cat.py --model_type optimized --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)"
+train-optimized: ## Train the optimized Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=32 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10)
+	uv run python3 scripts/train_neural_cat.py --model_type optimized --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE)
 
 eval: ## Evaluate the best checkpoint (auto-selected lowest validation loss)
 	uv run python3 scripts/evaluate_neural_cat.py
@@ -81,6 +82,9 @@ compare: ## Compare all evaluated models and update reports
 test: ## Run unit tests for both base and optimized models
 	PYTHONPATH=src uv run python3 tests/test_neural_cat.py
 	PYTHONPATH=src uv run python3 tests/test_neural_cat_optimized.py
+
+plot: ## Plot training/validation loss curves from the latest log
+	uv run python3 scripts/plot_loss.py
 
 clean: ## Remove temporary caches and pytest directory
 	rm -rf .pytest_cache

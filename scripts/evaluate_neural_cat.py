@@ -70,11 +70,13 @@ def main():
         question_embeddings = {}
         question_concepts = {}
         question_features = {}
+        question_option_counts = {}
         
         for q in db_questions:
             if q.embedding is not None:
                 question_embeddings[q.id] = np.array(q.embedding, dtype=np.float32)
             question_concepts[q.id] = q.concept_ids or []
+            question_option_counts[q.id] = q.option_count or 0
             
             # Fetch tabular features if optimized model is used
             if model_type == "optimized":
@@ -155,6 +157,7 @@ def main():
         question_embeddings=question_embeddings,
         question_concepts=question_concepts,
         question_features=question_features,
+        question_option_counts=question_option_counts,
         max_seq_len=max_seq_len
     )
     
@@ -175,26 +178,28 @@ def main():
     with torch.no_grad():
         for batch in test_loader:
             if model_type == "optimized":
-                x, x_feat, r, T_time, Q, padding_mask = batch
+                x, x_feat, r, T_time, Q, padding_mask, g_priors = batch
                 x = x.to(device)
                 x_feat = x_feat.to(device)
                 r = r.to(device)
                 T_time = T_time.to(device)
                 Q = Q.to(device)
                 padding_mask = padding_mask.to(device)
+                g_priors = g_priors.to(device)
                 
                 # Forward pass for optimized model
-                P, g, s = model(x, x_feat, r, T_time, Q, padding_mask)
+                P, g, s = model(x, x_feat, r, T_time, Q, padding_mask, g_priors)
             else:
-                x, r, T_time, Q, padding_mask = batch
+                x, r, T_time, Q, padding_mask, g_priors = batch
                 x = x.to(device)
                 r = r.to(device)
                 T_time = T_time.to(device)
                 Q = Q.to(device)
                 padding_mask = padding_mask.to(device)
+                g_priors = g_priors.to(device)
                 
                 # Forward pass for base model
-                P, g, s = model(x, r, T_time, Q, padding_mask)
+                P, g, s = model(x, r, T_time, Q, padding_mask, g_priors)
             
             # Filter by padding mask
             mask_indices = padding_mask == True

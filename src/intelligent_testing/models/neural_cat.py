@@ -17,11 +17,12 @@ class NeuralCATRefiner(nn.Module):
             nn.Linear(d_item_hidden, 2)  # Output: [g_raw, s_raw]
         )
 
-    def forward(self, x: torch.Tensor, r: torch.Tensor):
+    def forward(self, x: torch.Tensor, r: torch.Tensor, g_priors: torch.Tensor | None = None):
         """
         Args:
             x: Question embeddings, shape (B, T, d_x)
             r: Raw student responses, shape (B, T)
+            g_priors: Prior guessing rates, shape (B, T)
         Returns:
             r_soft: Soft response labels, shape (B, T)
             g: Guessing parameters, shape (B, T)
@@ -32,8 +33,12 @@ class NeuralCATRefiner(nn.Module):
         g_raw = item_params[..., 0]
         s_raw = item_params[..., 1]
         
-        # Apply sigmoid to constrain parameters to [0, 1]
-        g = torch.sigmoid(g_raw)
+        # Apply sigmoid and scale by guessing prior
+        if g_priors is not None:
+            g = torch.sigmoid(g_raw) * g_priors
+        else:
+            g = torch.sigmoid(g_raw) * 0.25
+            
         s = torch.sigmoid(s_raw)
         
         # Apply 4PL soft label formula:
@@ -299,7 +304,7 @@ class NeuralCATEngine(nn.Module):
         )
         self.predictor = NeuralCATPredictor(d_x=d_x, d_h=d_h)
 
-    def forward(self, x: torch.Tensor, r: torch.Tensor, T_time: torch.Tensor, Q: torch.Tensor, padding_mask: torch.Tensor | None = None):
+    def forward(self, x: torch.Tensor, r: torch.Tensor, T_time: torch.Tensor, Q: torch.Tensor, padding_mask: torch.Tensor | None = None, g_priors: torch.Tensor | None = None):
         """
         Args:
             x: Sequence of question embeddings, shape (B, T, d_x)
@@ -307,6 +312,7 @@ class NeuralCATEngine(nn.Module):
             T_time: Sequence of response times, shape (B, T)
             Q: Sequence of binary Q-matrices, shape (B, T, K)
             padding_mask: Boolean mask indicating valid steps (B, T)
+            g_priors: Prior guessing rates, shape (B, T)
         Returns:
             P: Predictions for response sequence, shape (B, T)
             g: Guessing parameters, shape (B, T)
@@ -315,7 +321,7 @@ class NeuralCATEngine(nn.Module):
         B, SeqLen, _ = x.shape
         
         # 1. Block 1: 4PL Input Refiner
-        r_soft, g, s = self.refiner(x, r)
+        r_soft, g, s = self.refiner(x, r, g_priors)
         
         # 2. Block 2: Input Embedding Module
         I = self.embedding(x, T_time, r_soft)
