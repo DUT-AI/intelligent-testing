@@ -6,8 +6,8 @@
 
 # Default variables for model training/evaluation
 EPOCHS ?= 50
-BATCH_SIZE ?= 20
-MAX_SEQ_LEN ?= 100
+BATCH_SIZE ?= 64
+MAX_SEQ_LEN ?= 50
 CHECKPOINT ?= ""
 RESUME ?= 
 PATIENCE ?= 10

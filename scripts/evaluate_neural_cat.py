@@ -12,7 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src'
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from app.infrastructure.database.connection import SessionLocal
-from app.infrastructure.database.models import Question, StudentSequence
+from app.infrastructure.database.models import Question, ExamSession, ExamInteraction
 from scripts.train_neural_cat import StudentSequenceDataset
 
 def parse_args():
@@ -64,12 +64,20 @@ def main():
     print("--- Connecting to database and loading question metadata ---")
     db_session = SessionLocal()
     try:
-        db_questions = db_session.query(Question).all()
+        from sqlalchemy.orm import joinedload
+        if model_type == "optimized":
+            db_questions = (
+                db_session.query(Question)
+                .options(joinedload(Question.features), joinedload(Question.misconceptions))
+                .all()
+            )
+        else:
+            db_questions = db_session.query(Question).all()
         print(f"Loaded {len(db_questions)} questions from database.")
         
         question_embeddings = {}
         question_concepts = {}
-        question_features = {}
+        question_features = {} if model_type == "optimized" else None
         question_option_counts = {}
         
         for q in db_questions:
@@ -79,7 +87,7 @@ def main():
             question_option_counts[q.id] = q.option_count or 0
             
             # Fetch tabular features if optimized model is used
-            if model_type == "optimized":
+            if model_type == "optimized" and question_features is not None:
                 feat_vec = []
                 # 17 features from question_features
                 if q.features is not None:
@@ -119,11 +127,24 @@ def main():
                     
                 question_features[q.id] = np.array(feat_vec, dtype=np.float32)
             
-        print("Loading test sequences...")
-        test_sequences = db_session.query(StudentSequence).filter(
-            StudentSequence.dataset_type == "test"
-        ).all()
-        print(f"Loaded {len(test_sequences)} test sequences.")
+        print("Loading test sequences from exam_sessions...")
+        from sqlalchemy.orm import joinedload
+        import random
+
+        all_sessions = (
+            db_session.query(ExamSession)
+            .options(joinedload(ExamSession.interactions))
+            .all()
+        )
+        valid_sessions = [s for s in all_sessions if len(s.interactions) > 0]
+
+        # Shuffle and split using the same seed to get the validation/test set (last 20%)
+        random.seed(42)
+        random.shuffle(valid_sessions)
+
+        split_idx = int(len(valid_sessions) * 0.8)
+        test_sequences = valid_sessions[split_idx:]
+        print(f"Loaded {len(test_sequences)} test sessions from exam_sessions.")
     except Exception as e:
         print(f"Database error: {e}")
         return
@@ -249,7 +270,7 @@ def main():
     print("="*50)
 
     # Write report to artifact directory
-    artifacts_dir = "/home/nguyenhuynh/.gemini/antigravity/brain/fdeeccda-c63b-4757-ad46-2cc0de664472"
+    artifacts_dir = "artifacts"
     os.makedirs(artifacts_dir, exist_ok=True)
     report_path = os.path.join(artifacts_dir, "evaluation_report.md")
     

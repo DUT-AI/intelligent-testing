@@ -1,18 +1,24 @@
-import os
-import sys
 import argparse
+import os
+import random
+import sys
+
+import lightning as L
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
-import lightning as L
-from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from sqlalchemy.orm import joinedload
+from torch.utils.data import DataLoader, Dataset
 
 # Ensure src and project root are in python path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 from app.infrastructure.database.connection import SessionLocal
-from app.infrastructure.database.models import Question, StudentSequence
+from app.infrastructure.database.models import ExamInteraction, ExamSession, Question
+from intelligent_testing.models.lit_neural_cat import LitNeuralCAT
+from intelligent_testing.models.lit_neural_cat_optimized import (
+    LitNeuralCATOptimized,
+)
 
 
 class StudentSequenceDataset(Dataset):
@@ -34,76 +40,61 @@ class StudentSequenceDataset(Dataset):
         # Pre-parse sequences to avoid string splitting and dictionary lookups inside the training loop
         print("Pre-parsing sequences for high-speed training...")
         self.processed = []
-        for seq in sequences:
-            q_ids = seq.questions.split(",")
-            c_ids = seq.concepts.split(",")
-            r_vals = seq.responses.split(",")
-            t_vals = seq.timestamps.split(",")
+        for session in sequences:
+            # Sort interactions by step_order
+            interactions = sorted(session.interactions, key=lambda x: x.step_order)
+            seq_len = min(len(interactions), max_seq_len)
+            if seq_len == 0:
+                continue
 
-            seq_len = min(len(q_ids), max_seq_len)
-            q_ids = q_ids[:seq_len]
-            c_ids = c_ids[:seq_len]
-            r_vals = r_vals[:seq_len]
-            t_vals = t_vals[:seq_len]
-
-            # Calculate response times
-            timestamps = [float(t) for t in t_vals]
-            times = []
-            for i in range(seq_len):
-                if i == 0:
-                    times.append(30.0)
-                else:
-                    diff = (timestamps[i] - timestamps[i - 1]) / 1000.0
-                    if diff < 1.0 or diff > 300.0:
-                        diff = 30.0
-                    times.append(diff)
+            interactions = interactions[:seq_len]
 
             # Pre-fetch embeddings, features, and concept IDs
             embs = []
             feats = []
             concepts_mapped = []
             g_priors = []
+            r_vals = []
+            times = []
 
             for t in range(seq_len):
-                q_id = q_ids[t]
+                inter = interactions[t]
+                q_id = inter.question_id
                 embs.append(question_embeddings.get(q_id))
                 if question_features is not None:
                     feats.append(question_features.get(q_id))
 
                 # Prior guessing rate based on options count
-                opt_cnt = 0
-                if question_option_counts is not None:
-                    opt_cnt = question_option_counts.get(q_id, 0)
+                opt_cnt = question_option_counts.get(q_id, 0)
                 g_prior = 1.0 / opt_cnt if opt_cnt >= 2 else 0.01
                 g_priors.append(g_prior)
 
-                # Active concept
-                active_concepts = []
-                try:
-                    c_id = int(c_ids[t])
-                    if 0 <= c_id < K:
-                        active_concepts.append(c_id)
-                except ValueError:
-                    pass
-                # Additional concepts from DB mapping
+                # Active concepts from database mapping
                 db_concepts = question_concepts.get(q_id, [])
-                for cid in db_concepts:
-                    if 0 <= cid < K:
-                        active_concepts.append(cid)
+                active_concepts = [cid for cid in db_concepts if 0 <= cid < K]
                 concepts_mapped.append(active_concepts)
+
+                # Response (1.0 or 0.0)
+                r_vals.append(1.0 if inter.is_correct else 0.0)
+
+                # Response time (with clipping)
+                diff = float(inter.response_time_sec)
+                if diff < 1.0 or diff > 300.0:
+                    diff = 30.0
+                times.append(diff)
 
             self.processed.append(
                 {
                     "seq_len": seq_len,
                     "embs": embs,
                     "feats": feats if question_features is not None else None,
-                    "r_vals": [float(r) for r in r_vals],
+                    "r_vals": r_vals,
                     "times": times,
                     "concepts_mapped": concepts_mapped,
                     "g_priors": g_priors,
                 }
             )
-        print(f"Pre-parsed {len(sequences)} sequences successfully.")
+        print(f"Pre-parsed {len(self.processed)} sequences successfully.")
 
     def __len__(self):
         return len(self.processed)
@@ -196,11 +187,11 @@ def parse_args():
     parser.add_argument(
         "--batch_size", type=int, default=64, help="Batch size for training"
     )
-    parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate")
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument(
         "--lambda_reg",
         type=float,
-        default=0.1,
+        default=0.2,
         help="Guess/slip regularization strength",
     )
     parser.add_argument(
@@ -243,12 +234,23 @@ def main():
     db_session = SessionLocal()
     try:
         # Load all questions
-        db_questions = db_session.query(Question).all()
+        from sqlalchemy.orm import joinedload
+
+        if args.model_type == "optimized":
+            db_questions = (
+                db_session.query(Question)
+                .options(
+                    joinedload(Question.features), joinedload(Question.misconceptions)
+                )
+                .all()
+            )
+        else:
+            db_questions = db_session.query(Question).all()
         print(f"Loaded {len(db_questions)} questions from database.")
 
         question_embeddings = {}
         question_concepts = {}
-        question_features = {}
+        question_features = {} if args.model_type == "optimized" else None
         question_option_counts = {}
 
         for q in db_questions:
@@ -259,7 +261,7 @@ def main():
             question_option_counts[q.id] = q.option_count or 0
 
             # Fetch tabular features if optimized model is used
-            if args.model_type == "optimized":
+            if args.model_type == "optimized" and question_features is not None:
                 feat_vec = []
                 # 17 features from question_features
                 if q.features is not None:
@@ -303,20 +305,27 @@ def main():
 
                 question_features[q.id] = np.array(feat_vec, dtype=np.float32)
 
-        # Fetch student sequences
-        print("Loading student sequences...")
-        train_sequences = (
-            db_session.query(StudentSequence)
-            .filter(StudentSequence.dataset_type == "train_valid")
+        # Fetch exam sessions and interactions
+        print("Loading exam sessions and interactions...")
+
+        all_sessions = (
+            db_session.query(ExamSession)
+            .options(joinedload(ExamSession.interactions))
             .all()
         )
-        val_sequences = (
-            db_session.query(StudentSequence)
-            .filter(StudentSequence.dataset_type == "test")
-            .all()
-        )
+        # Only keep sessions with at least one interaction
+        valid_sessions = [s for s in all_sessions if len(s.interactions) > 0]
+
+        # Shuffle and split 80/20
+        random.seed(42)
+        random.shuffle(valid_sessions)
+
+        split_idx = int(len(valid_sessions) * 0.8)
+        train_sequences = valid_sessions[:split_idx]
+        val_sequences = valid_sessions[split_idx:]
+
         print(
-            f"Loaded {len(train_sequences)} training sequences and {len(val_sequences)} validation sequences."
+            f"Loaded {len(train_sequences)} training sessions and {len(val_sequences)} validation sessions from exam_sessions."
         )
 
     except Exception as e:
@@ -366,10 +375,6 @@ def main():
     # 3. Instantiate model
     print(f"Initializing model (type: {args.model_type})...")
     if args.model_type == "optimized":
-        from intelligent_testing.models.lit_neural_cat_optimized import (
-            LitNeuralCATOptimized,
-        )
-
         model = LitNeuralCATOptimized(
             d_embedding=1024,
             d_features=22,
@@ -384,15 +389,14 @@ def main():
         )
         ckpt_filename = "best-neural-cat-optimized-{epoch:02d}-{val_loss:.3f}"
     else:
-        from intelligent_testing.models.lit_neural_cat import LitNeuralCAT
 
         model = LitNeuralCAT(
             d_x=1024,
             d_time=32,
             d_h=128,
             K=1175,
-            nhead=4,
-            num_layers=2,
+            nhead=8,
+            num_layers=4,
             max_seq_len=args.max_seq_len,
             lr=args.lr,
             lambda_reg=args.lambda_reg,
@@ -407,12 +411,9 @@ def main():
         monitor="val_loss",
         mode="min",
     )
-    
+
     early_stop_callback = EarlyStopping(
-        monitor="val_loss",
-        patience=args.patience,
-        mode="min",
-        verbose=True
+        monitor="val_loss", patience=args.patience, mode="min", verbose=True
     )
 
     # 5. Initialize PyTorch Lightning Trainer
