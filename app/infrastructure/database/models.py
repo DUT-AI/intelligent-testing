@@ -30,7 +30,23 @@ class UserORM(Base):
 
 
 # ----------------- Research Dataset Tables -----------------
+class StudentSession(Base):
+    """
+    Represents student response sequences loaded by scripts/load_dataset.py.
+    """
 
+    __tablename__ = "student_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dataset_type: Mapped[str] = mapped_column(String(50), index=True)
+    fold: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    uid: Mapped[int] = mapped_column(Integer, index=True)
+    questions: Mapped[str] = mapped_column(Text)
+    concepts: Mapped[str] = mapped_column(Text)
+    responses: Mapped[str] = mapped_column(Text)
+    timestamps: Mapped[str] = mapped_column(Text)
+    is_repeat: Mapped[str] = mapped_column(Text)
+    response_time: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 class OperatorCount(Base):
     """
@@ -167,27 +183,6 @@ class LLMMisconception(Base):
 
     question: Mapped["Question"] = relationship(back_populates="misconceptions")
 
-
-class StudentSequence(Base):
-    """
-    Represents chronological student response sequences for Knowledge Tracing from 'test.csv' and 'train_valid_sequences.csv'
-    """
-
-    __tablename__ = "student_sequences"
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    dataset_type: Mapped[str] = mapped_column(
-        String(50), index=True
-    )  # 'train_valid' or 'test'
-    fold: Mapped[int] = mapped_column(index=True)
-    uid: Mapped[int] = mapped_column(index=True)
-    questions: Mapped[str] = mapped_column(Text)
-    concepts: Mapped[str] = mapped_column(Text)
-    responses: Mapped[str] = mapped_column(Text)
-    timestamps: Mapped[str] = mapped_column(Text)
-    is_repeat: Mapped[str] = mapped_column(Text)
-    cidxs: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    selectmasks: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
 class ExamSession(Base):
     """
