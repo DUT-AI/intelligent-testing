@@ -8,7 +8,6 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 load_dotenv()
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
-print("URL DATABASE LÀ:", SQLALCHEMY_DATABASE_URL) # Thêm dòng này để kiểm tra
 def custom_json_serializer(obj):
     return json.dumps(obj, ensure_ascii=False)
 
@@ -33,7 +32,7 @@ from app.infrastructure.database.models import (
     Question,
     QuestionFeatures,
     LLMMisconception,
-    StudentSequence,
+    StudentSession
 )
 
 DATA_DIR = "data/Official"
@@ -47,6 +46,10 @@ KC_MAPS_FILE = os.path.join(
     "translation",
     "kc_maps.json",
 )
+train_session_file = 'E:\\Semester 8 Document\\IntelligentTesting\\IntelligentTesting\\intelligent-testing\\data\\raw\\XES3G5M\\XES3G5M\\kc_level\\final_train.csv'
+valid_session_file = 'E:\\Semester 8 Document\\IntelligentTesting\\IntelligentTesting\\intelligent-testing\\data\\raw\\XES3G5M\\XES3G5M\\kc_level\\final_val.csv'
+test_session_file = 'E:\\Semester 8 Document\\IntelligentTesting\\IntelligentTesting\\intelligent-testing\\data\\raw\\XES3G5M\\XES3G5M\\kc_level\\final_test.csv'
+
 
 
 def normalize_options(raw_options):
@@ -74,6 +77,49 @@ def normalize_options(raw_options):
         normalized[str(key)] = value
 
     return normalized
+
+def load_student_sessions(session, train_session_file=train_session_file, valid_session_file=valid_session_file, test_session_file=test_session_file):
+    print("⏳ Loading student sessions from XES3G5M...")
+    for dataset_type, filepath in [("train", train_session_file), ("val", valid_session_file), ("test", test_session_file)]:
+        if not os.path.exists(filepath):
+            print(f"⚠️ {filepath} not found, skipping {dataset_type} sessions.")
+            continue
+
+        df = pd.read_csv(filepath)
+        existing_uids = set(r[0] for r in session.query(StudentSession.uid).filter_by(dataset_type=dataset_type).all())
+
+        sessions_to_insert = []
+        for _, row in df.iterrows():
+            uid = int(row["uid"])
+            if uid in existing_uids:
+                continue
+
+            fold_value = row["fold"] if "fold" in row and not pd.isna(row["fold"]) else None
+
+            sessions_to_insert.append(
+                StudentSession(
+                    dataset_type=dataset_type,
+                    fold=int(fold_value) if fold_value is not None else None,
+                    uid=uid,
+                    questions=str(row["questions"]),
+                    concepts=str(row["concepts"]),
+                    responses=str(row["responses"]),
+                    timestamps=str(row["timestamps"]),
+                    is_repeat=str(row["is_repeat"]),
+                    response_time=str(row["response_time"]) if "response_time" in row else None
+                )
+            )
+
+        if sessions_to_insert:
+            batch_size = 1000
+            for i in range(0, len(sessions_to_insert), batch_size):
+                chunk = sessions_to_insert[i : i + batch_size]
+                session.bulk_save_objects(chunk)
+                session.commit()
+                print(f"   • Loaded {dataset_type} sessions {i + 1} to {min(i + batch_size, len(sessions_to_insert))}...")
+            print(f"✅ Loaded {len(sessions_to_insert)} new {dataset_type} student sessions successfully.")
+        else:
+            print(f"ℹ️ All {dataset_type} student sessions already loaded.")
 
 
 def load_operators(session):
@@ -392,63 +438,6 @@ def load_llm_misconceptions(session):
         print("ℹ️ All LLM misconceptions already loaded.")
 
 
-def load_sequences(session, filename, dataset_type):
-    print(f"⏳ Loading sequences from {filename} ({dataset_type})...")
-    filepath = os.path.join(DATA_DIR, filename)
-    if not os.path.exists(filepath):
-        print(f"⚠️ {filepath} not found, skipping.")
-        return
-
-    # Check if we have loaded sequences for this dataset_type already
-    exists = session.query(StudentSequence).filter_by(dataset_type=dataset_type).first()
-    if exists:
-        print(f"ℹ️ Sequences for '{dataset_type}' are already loaded.")
-        return
-
-    # Read CSV using pandas
-    df = pd.read_csv(filepath)
-
-    sequences_to_insert = []
-    for _, row in df.iterrows():
-        cidxs_val = (
-            str(row["cidxs"])
-            if "cidxs" in df.columns and pd.notna(row["cidxs"])
-            else None
-        )
-        selectmasks_val = (
-            str(row["selectmasks"])
-            if "selectmasks" in df.columns and pd.notna(row["selectmasks"])
-            else None
-        )
-
-        sequences_to_insert.append(
-            StudentSequence(
-                dataset_type=dataset_type,
-                fold=int(row["fold"]),
-                uid=int(row["uid"]),
-                questions=str(row["questions"]),
-                concepts=str(row["concepts"]),
-                responses=str(row["responses"]),
-                timestamps=str(row["timestamps"]),
-                is_repeat=str(row["is_repeat"]),
-                cidxs=cidxs_val,
-                selectmasks=selectmasks_val,
-            )
-        )
-
-    if sequences_to_insert:
-        batch_size = 2000
-        for i in range(0, len(sequences_to_insert), batch_size):
-            chunk = sequences_to_insert[i : i + batch_size]
-            session.bulk_save_objects(chunk)
-            session.commit()
-            print(
-                f"   • Loaded sequences {i + 1} to {min(i + batch_size, len(sequences_to_insert))}..."
-            )
-        print(
-            f"✅ Loaded {len(sequences_to_insert)} {dataset_type} sequences successfully."
-        )
-
 
 def main():
     print("🚀 RESEARCH DATASET DATABASE LOADER INITIALIZED 🚀\n")
@@ -462,10 +451,8 @@ def main():
         load_questions(session)
         load_question_features(session)
         load_llm_misconceptions(session)
+        load_student_sessions(session)
 
-        # Load sequences (from test.csv and train_valid_sequences.csv)
-        load_sequences(session, "test.csv", "test")
-        load_sequences(session, "train_valid_sequences.csv", "train_valid")
 
         print("\n🏆 DATABASE LOADING COMPLETED SUCCESSFULLY! 🏆")
     except Exception as e:
