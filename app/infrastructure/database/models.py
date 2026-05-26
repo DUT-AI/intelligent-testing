@@ -1,5 +1,5 @@
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import ForeignKey, Integer, String, Text, JSON, DateTime, Float, Boolean
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -201,7 +201,7 @@ class ExamSession(Base):
         Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     
-    start_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    start_time: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     end_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     total_questions: Mapped[int] = mapped_column(Integer, default=0)
     
@@ -248,7 +248,7 @@ class ExamInteraction(Base):
     response_time_sec: Mapped[int] = mapped_column(Integer, nullable=False)
     
     # Mốc thời gian chính xác khi hệ thống nhận được câu trả lời này
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     # NĂNG LỰC ƯỚC LƯỢNG NGAY TẠI THỜI ĐIỂM NÀY
     # Trường này cực kỳ quan trọng: Lưu lại Theta sau khi thuật toán chạy xong ở câu này.

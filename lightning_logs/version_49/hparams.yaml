@@ -1,0 +1,11 @@
+K: 1175
+alpha_max: 0.5
+d_h: 128
+d_time: 32
+d_x: 1024
+k_warmup: 5
+lambda_reg: 0.2
+lr: 0.001
+max_seq_len: 50
+nhead: 8
+num_layers: 4

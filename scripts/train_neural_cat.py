@@ -1,24 +1,18 @@
 import argparse
 import os
-import random
-import sys
 
 import lightning as L
 import numpy as np
 import torch
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-from sqlalchemy.orm import joinedload
 from torch.utils.data import DataLoader, Dataset
 
-# Ensure src and project root are in python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from app.infrastructure.database.connection import SessionLocal
-from app.infrastructure.database.models import ExamInteraction, ExamSession, Question
-from intelligent_testing.models.lit_neural_cat import LitNeuralCAT
-from intelligent_testing.models.lit_neural_cat_optimized import (
+from app.core.lit_neural_cat import LitNeuralCAT
+from app.core.lit_neural_cat_optimized import (
     LitNeuralCATOptimized,
 )
+from app.infrastructure.database.connection import SessionLocal
+from app.infrastructure.database.models import Question, StudentSession
 
 
 class StudentSequenceDataset(Dataset):
@@ -35,138 +29,151 @@ class StudentSequenceDataset(Dataset):
         self.max_seq_len = max_seq_len
         self.K = K
         self.question_features = question_features
-        self.question_option_counts = question_option_counts
 
-        # Pre-parse sequences to avoid string splitting and dictionary lookups inside the training loop
-        print("Pre-parsing sequences for high-speed training...")
+        # 1. Build question ID to matrix index mapping
+        # Index 0 is reserved for padding question (all zeros)
+        q_ids_unique = list(question_embeddings.keys())
+        self.q_id_to_idx = {q_id: idx + 1 for idx, q_id in enumerate(q_ids_unique)}
+        num_questions = len(q_ids_unique)
+        
+        # 2. Determine max concepts per step across questions
+        self.max_c = 1
+        for q_id, concepts in question_concepts.items():
+            active_concepts = [cid for cid in concepts if 0 <= cid < K]
+            if len(active_concepts) > self.max_c:
+                self.max_c = len(active_concepts)
+        self.max_c = max(self.max_c, 1)
+        print(f"Max concepts per question: {self.max_c}")
+        
+        # 3. Pre-build question attribute matrices
+        print("Pre-building question metadata matrices...")
+        self.question_embeddings_matrix = np.zeros((num_questions + 1, 1024), dtype=np.float32)
+        self.question_concepts_matrix = np.full((num_questions + 1, self.max_c), -1, dtype=np.int64)
+        self.question_concepts_matrix[0, 0] = 0  # Prevents Softmax NaN at padding steps where question index is 0
+        self.question_g_priors = np.zeros(num_questions + 1, dtype=np.float32)
+        
+        if question_features is not None:
+            self.question_features_matrix = np.zeros((num_questions + 1, 22), dtype=np.float32)
+            
+        for q_id, idx in self.q_id_to_idx.items():
+            # Embeddings
+            emb = question_embeddings.get(q_id)
+            if emb is not None:
+                self.question_embeddings_matrix[idx] = emb
+                
+            # Concepts
+            db_concepts = question_concepts.get(q_id, [])
+            active_concepts = [cid for cid in db_concepts if 0 <= cid < K]
+            if not active_concepts:
+                active_concepts = [0]
+            self.question_concepts_matrix[idx, :len(active_concepts)] = active_concepts
+            
+            # Guess priors
+            opt_cnt = question_option_counts.get(q_id, 0) if question_option_counts else 0
+            g_prior = 1.0 / opt_cnt if opt_cnt >= 2 else 0.01
+            self.question_g_priors[idx] = g_prior
+            
+            # Tabular features
+            if question_features is not None:
+                feat = question_features.get(q_id)
+                if feat is not None:
+                    self.question_features_matrix[idx] = feat
+
+        # 4. Pre-parse sequences to list of integer indices (O(1) RAM friendly)
+        print("Pre-parsing student sequences...")
         self.processed = []
         for session in sequences:
-            # Sort interactions by step_order
-            interactions = sorted(session.interactions, key=lambda x: x.step_order)
-            seq_len = min(len(interactions), max_seq_len)
+            if not session.questions or not session.responses:
+                continue
+            
+            q_ids_seq = [q.strip() for q in session.questions.split(",") if q.strip()]
+            r_strings = [r.strip() for r in session.responses.split(",") if r.strip()]
+            
+            seq_len = min(len(q_ids_seq), len(r_strings), max_seq_len)
             if seq_len == 0:
                 continue
+            
+            q_ids_seq = q_ids_seq[:seq_len]
+            r_strings = r_strings[:seq_len]
+            
+            if session.response_time:
+                raw_times = [t.strip() for t in session.response_time.split(",") if t.strip()]
+            else:
+                raw_times = []
 
-            interactions = interactions[:seq_len]
-
-            # Pre-fetch embeddings, features, and concept IDs
-            embs = []
-            feats = []
-            concepts_mapped = []
-            g_priors = []
-            r_vals = []
-            times = []
-
+            # 4.1 Map question IDs to matrix indices
+            q_indices = np.zeros(self.max_seq_len, dtype=np.int64)
             for t in range(seq_len):
-                inter = interactions[t]
-                q_id = inter.question_id
-                embs.append(question_embeddings.get(q_id))
-                if question_features is not None:
-                    feats.append(question_features.get(q_id))
+                q_indices[t] = self.q_id_to_idx.get(q_ids_seq[t], 0)
 
-                # Prior guessing rate based on options count
-                opt_cnt = question_option_counts.get(q_id, 0)
-                g_prior = 1.0 / opt_cnt if opt_cnt >= 2 else 0.01
-                g_priors.append(g_prior)
+            # 4.2 Parse responses
+            r_arr = np.zeros(self.max_seq_len, dtype=np.float32)
+            for t in range(seq_len):
+                try:
+                    r_arr[t] = float(r_strings[t])
+                except ValueError:
+                    r_arr[t] = 0.0
 
-                # Active concepts from database mapping
-                db_concepts = question_concepts.get(q_id, [])
-                active_concepts = [cid for cid in db_concepts if 0 <= cid < K]
-                concepts_mapped.append(active_concepts)
-
-                # Response (1.0 or 0.0)
-                r_vals.append(1.0 if inter.is_correct else 0.0)
-
-                # Response time (with clipping)
-                diff = float(inter.response_time_sec)
+            # 4.3 Parse response times
+            time_arr = np.zeros(self.max_seq_len, dtype=np.float32)
+            for t in range(seq_len):
+                try:
+                    diff = float(raw_times[t]) if t < len(raw_times) else 30.0
+                except (ValueError, IndexError):
+                    diff = 30.0
                 if diff < 1.0 or diff > 300.0:
                     diff = 30.0
-                times.append(diff)
+                time_arr[t] = diff
+
+            # 4.4 Padding mask
+            mask_arr = np.zeros(self.max_seq_len, dtype=np.bool_)
+            mask_arr[:seq_len] = True
 
             self.processed.append(
                 {
-                    "seq_len": seq_len,
-                    "embs": embs,
-                    "feats": feats if question_features is not None else None,
-                    "r_vals": r_vals,
-                    "times": times,
-                    "concepts_mapped": concepts_mapped,
-                    "g_priors": g_priors,
+                    "q_indices": q_indices,
+                    "r_arr": r_arr,
+                    "time_arr": time_arr,
+                    "mask_arr": mask_arr,
                 }
             )
-        print(f"Pre-parsed {len(self.processed)} sequences successfully.")
+            
+        print(f"Pre-parsed and optimized {len(self.processed)} sequences successfully.")
 
     def __len__(self):
         return len(self.processed)
 
     def __getitem__(self, index):
         item = self.processed[index]
-        seq_len = item["seq_len"]
-
-        # Initialize arrays with zeros/padding defaults
-        x = np.zeros((self.max_seq_len, 1024), dtype=np.float32)
-        x_feat = np.zeros((self.max_seq_len, 22), dtype=np.float32)
-        r = np.zeros(self.max_seq_len, dtype=np.float32)
-        T_time = np.zeros(self.max_seq_len, dtype=np.float32)
-        Q = np.zeros((self.max_seq_len, self.K), dtype=np.float32)
-        padding_mask = np.zeros(self.max_seq_len, dtype=np.bool_)
-        g_priors = np.zeros(self.max_seq_len, dtype=np.float32)
-
-        for t in range(seq_len):
-            # Embeddings
-            emb = item["embs"][t]
-            if emb is not None:
-                x[t] = emb
-
-            # Tabular features
-            if self.question_features is not None:
-                feat = item["feats"][t]
-                if feat is not None:
-                    x_feat[t] = feat
-
-            # Responses
-            r_val = item["r_vals"][t]
-            if r_val < 0.0 or r_val > 1.0:
-                r[t] = 0.0
-                is_valid = False
-            else:
-                r[t] = r_val
-                is_valid = True
-
-            # Response times
-            T_time[t] = item["times"][t]
-
-            # Prior guessing
-            g_priors[t] = item["g_priors"][t]
-
-            # Q-matrix setup
-            for cid in item["concepts_mapped"][t]:
-                Q[t, cid] = 1.0
-
-            # Fallback if no concept is active
-            if Q[t].sum() == 0:
-                Q[t, 0] = 1.0
-
-            padding_mask[t] = is_valid
-
+        q_indices = item["q_indices"]
+        
+        # O(1) Vectorized lookup
+        x = self.question_embeddings_matrix[q_indices]
+        r = item["r_arr"]
+        T_time = item["time_arr"]
+        concept_indices = self.question_concepts_matrix[q_indices]
+        padding_mask = item["mask_arr"]
+        g_priors = self.question_g_priors[q_indices]
+        
         if self.question_features is not None:
+            x_feat = self.question_features_matrix[q_indices]
             return (
-                torch.tensor(x),
-                torch.tensor(x_feat),
-                torch.tensor(r),
-                torch.tensor(T_time),
-                torch.tensor(Q),
-                torch.tensor(padding_mask),
-                torch.tensor(g_priors),
+                torch.from_numpy(x),
+                torch.from_numpy(x_feat),
+                torch.from_numpy(r),
+                torch.from_numpy(T_time),
+                torch.from_numpy(concept_indices),
+                torch.from_numpy(padding_mask),
+                torch.from_numpy(g_priors),
             )
         else:
             return (
-                torch.tensor(x),
-                torch.tensor(r),
-                torch.tensor(T_time),
-                torch.tensor(Q),
-                torch.tensor(padding_mask),
-                torch.tensor(g_priors),
+                torch.from_numpy(x),
+                torch.from_numpy(r),
+                torch.from_numpy(T_time),
+                torch.from_numpy(concept_indices),
+                torch.from_numpy(padding_mask),
+                torch.from_numpy(g_priors),
             )
 
 
@@ -210,10 +217,28 @@ def parse_args():
         help="Fraction/count of validation batches to use",
     )
     parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=0,
+        help="Number of worker processes for data loading",
+    )
+    parser.add_argument(
         "--ckpt_path",
         type=str,
         default=None,
         help="Path to checkpoint to resume training from",
+    )
+    parser.add_argument(
+        "--precision",
+        type=str,
+        default="bf16-mixed",
+        choices=["32", "16-mixed", "bf16-mixed"],
+        help="Mixed precision training setting",
+    )
+    parser.add_argument(
+        "--compile",
+        action="store_true",
+        help="Compile the model using PyTorch 2.x compile feature",
     )
     parser.add_argument(
         "--patience",
@@ -247,6 +272,18 @@ def main():
         else:
             db_questions = db_session.query(Question).all()
         print(f"Loaded {len(db_questions)} questions from database.")
+
+        # Determine K automatically from database concepts
+        max_concept_id = 0
+        for q in db_questions:
+            if q.concept_ids:
+                for cid in q.concept_ids:
+                    if cid > max_concept_id:
+                        max_concept_id = cid
+        K_val = max_concept_id + 1
+        if K_val < 1:
+            K_val = 1175
+        print(f"Automatically determined K (number of concepts) = {K_val}")
 
         question_embeddings = {}
         question_concepts = {}
@@ -305,27 +342,22 @@ def main():
 
                 question_features[q.id] = np.array(feat_vec, dtype=np.float32)
 
-        # Fetch exam sessions and interactions
-        print("Loading exam sessions and interactions...")
+        # Fetch student sessions from database
+        print("Loading student sessions from student_sessions...")
 
-        all_sessions = (
-            db_session.query(ExamSession)
-            .options(joinedload(ExamSession.interactions))
+        train_sequences = (
+            db_session.query(StudentSession)
+            .filter(StudentSession.dataset_type == "train")
             .all()
         )
-        # Only keep sessions with at least one interaction
-        valid_sessions = [s for s in all_sessions if len(s.interactions) > 0]
-
-        # Shuffle and split 80/20
-        random.seed(42)
-        random.shuffle(valid_sessions)
-
-        split_idx = int(len(valid_sessions) * 0.8)
-        train_sequences = valid_sessions[:split_idx]
-        val_sequences = valid_sessions[split_idx:]
+        val_sequences = (
+            db_session.query(StudentSession)
+            .filter(StudentSession.dataset_type == "val")
+            .all()
+        )
 
         print(
-            f"Loaded {len(train_sequences)} training sessions and {len(val_sequences)} validation sessions from exam_sessions."
+            f"Loaded {len(train_sequences)} training sessions and {len(val_sequences)} validation sessions from student_sessions."
         )
 
     except Exception as e:
@@ -347,6 +379,7 @@ def main():
         question_features=question_features,
         question_option_counts=question_option_counts,
         max_seq_len=args.max_seq_len,
+        K=K_val,
     )
     val_dataset = StudentSequenceDataset(
         sequences=val_sequences,
@@ -355,32 +388,36 @@ def main():
         question_features=question_features,
         question_option_counts=question_option_counts,
         max_seq_len=args.max_seq_len,
+        K=K_val,
     )
 
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=0,
+        num_workers=args.num_workers,
         pin_memory=True,
+        persistent_workers=True if args.num_workers > 0 else False,
+        drop_last=True,
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=0,
+        num_workers=args.num_workers,
         pin_memory=True,
+        persistent_workers=True if args.num_workers > 0 else False,
     )
 
     # 3. Instantiate model
-    print(f"Initializing model (type: {args.model_type})...")
+    print(f"Initializing model (type: {args.model_type}) with K={K_val}...")
     if args.model_type == "optimized":
         model = LitNeuralCATOptimized(
             d_embedding=1024,
             d_features=22,
             d_time=32,
             d_h=128,
-            K=1175,
+            K=K_val,
             nhead=8,
             num_layers=4,
             max_seq_len=args.max_seq_len,
@@ -394,7 +431,7 @@ def main():
             d_x=1024,
             d_time=32,
             d_h=128,
-            K=1175,
+            K=K_val,
             nhead=8,
             num_layers=4,
             max_seq_len=args.max_seq_len,
@@ -402,6 +439,10 @@ def main():
             lambda_reg=args.lambda_reg,
         )
         ckpt_filename = "best-neural-cat-{epoch:02d}-{val_loss:.3f}"
+        
+    if args.compile and hasattr(torch, "compile"):
+        print("Compiling model for maximum GPU performance...")
+        model = torch.compile(model)  # type: ignore
 
     # 4. Define Checkpoint Callback
     checkpoint_callback = ModelCheckpoint(
@@ -420,10 +461,17 @@ def main():
     device = "gpu" if torch.cuda.is_available() else "cpu"
     print(f"Training on: {device}")
 
+    if device == "gpu":
+        torch.set_float32_matmul_precision('medium')
+        precision = args.precision
+    else:
+        precision = "32"
+
     trainer = L.Trainer(
         max_epochs=args.epochs,
         accelerator=device,
         devices=1 if device == "gpu" else "auto",
+        precision=precision,
         callbacks=[checkpoint_callback, early_stop_callback],
         limit_train_batches=args.limit_train_batches,
         limit_val_batches=args.limit_val_batches,

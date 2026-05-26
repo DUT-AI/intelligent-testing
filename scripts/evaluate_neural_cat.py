@@ -1,25 +1,31 @@
-import os
-import sys
-import glob
 import argparse
+import glob
+import os
+
 import numpy as np
 import torch
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 from torch.utils.data import DataLoader
-from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score, f1_score
 
-# Ensure src and project root are in python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
+from app.core.lit_neural_cat import LitNeuralCAT
+from app.core.lit_neural_cat_optimized import LitNeuralCATOptimized
 from app.infrastructure.database.connection import SessionLocal
-from app.infrastructure.database.models import Question, ExamSession, ExamInteraction
+from app.infrastructure.database.models import Question, StudentSession
 from scripts.train_neural_cat import StudentSequenceDataset
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate NeuralCAT model on test sequences")
     parser.add_argument("--checkpoint_path", type=str, default=None, help="Path to checkpoint file")
     parser.add_argument("--model_type", type=str, default="auto", choices=["auto", "base", "optimized"], help="Model version to evaluate")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for evaluation")
+    parser.add_argument("--num_workers", type=int, default=4, help="Number of workers for data loader")
     return parser.parse_args()
 
 def main():
@@ -127,24 +133,14 @@ def main():
                     
                 question_features[q.id] = np.array(feat_vec, dtype=np.float32)
             
-        print("Loading test sequences from exam_sessions...")
-        from sqlalchemy.orm import joinedload
-        import random
+        print("Loading test sequences from student_sessions...")
 
-        all_sessions = (
-            db_session.query(ExamSession)
-            .options(joinedload(ExamSession.interactions))
+        test_sequences = (
+            db_session.query(StudentSession)
+            .filter(StudentSession.dataset_type == "test")
             .all()
         )
-        valid_sessions = [s for s in all_sessions if len(s.interactions) > 0]
-
-        # Shuffle and split using the same seed to get the validation/test set (last 20%)
-        random.seed(42)
-        random.shuffle(valid_sessions)
-
-        split_idx = int(len(valid_sessions) * 0.8)
-        test_sequences = valid_sessions[split_idx:]
-        print(f"Loaded {len(test_sequences)} test sessions from exam_sessions.")
+        print(f"Loaded {len(test_sequences)} test sessions from student_sessions.")
     except Exception as e:
         print(f"Database error: {e}")
         return
@@ -158,10 +154,9 @@ def main():
     # 3. Load model
     print(f"Loading model from checkpoint: {checkpoint_path} ...")
     if model_type == "optimized":
-        from intelligent_testing.models.lit_neural_cat_optimized import LitNeuralCATOptimized
+        
         model = LitNeuralCATOptimized.load_from_checkpoint(checkpoint_path)
     else:
-        from intelligent_testing.models.lit_neural_cat import LitNeuralCAT
         model = LitNeuralCAT.load_from_checkpoint(checkpoint_path)
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -186,7 +181,8 @@ def main():
         test_dataset,
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=0
+        num_workers=args.num_workers,
+        pin_memory=True
     )
 
     # 5. Inference loop
@@ -199,31 +195,34 @@ def main():
     with torch.no_grad():
         for batch in test_loader:
             if model_type == "optimized":
-                x, x_feat, r, T_time, Q, padding_mask, g_priors = batch
+                x, x_feat, r, T_time, concept_indices, padding_mask, g_priors = batch
                 x = x.to(device)
                 x_feat = x_feat.to(device)
                 r = r.to(device)
                 T_time = T_time.to(device)
-                Q = Q.to(device)
+                concept_indices = concept_indices.to(device)
                 padding_mask = padding_mask.to(device)
                 g_priors = g_priors.to(device)
                 
                 # Forward pass for optimized model
-                P, g, s = model(x, x_feat, r, T_time, Q, padding_mask, g_priors)
+                logits, g, s = model(x, x_feat, r, T_time, concept_indices, padding_mask, g_priors)
             else:
-                x, r, T_time, Q, padding_mask, g_priors = batch
+                x, r, T_time, concept_indices, padding_mask, g_priors = batch
                 x = x.to(device)
                 r = r.to(device)
                 T_time = T_time.to(device)
-                Q = Q.to(device)
+                concept_indices = concept_indices.to(device)
                 padding_mask = padding_mask.to(device)
                 g_priors = g_priors.to(device)
                 
                 # Forward pass for base model
-                P, g, s = model(x, r, T_time, Q, padding_mask, g_priors)
+                logits, g, s = model(x, r, T_time, concept_indices, padding_mask, g_priors)
+            
+            # Compute probabilities from logits
+            P = torch.sigmoid(logits)
             
             # Filter by padding mask
-            mask_indices = padding_mask == True
+            mask_indices = padding_mask
             
             preds_masked = P[mask_indices].cpu().numpy()
             targets_masked = r[mask_indices].cpu().numpy()

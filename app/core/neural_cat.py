@@ -157,8 +157,11 @@ class NeuralCATSequenceModel(nn.Module):
 class NeuralCATDecoder(nn.Module):
     """
     Block 4: Decoding Head & Ability Update Module
-    Updates the multi-dimensional ability matrix theta using Hard Gating (Q-matrix)
-    and a time-dependent Damping Factor.
+    Updates the multi-dimensional ability matrix theta using a gated Exponential Moving Average (EMA)
+    with a time-dependent Damping Factor to ensure convergence of estimated scores.
+    Optimized to use concept embeddings and vectorized EMA update to reduce parameters and VRAM.
+    Uses a non-linear candidate generator network to ensure high representation capacity.
+    Uses dummy concept at index K to prevent memory overwriting and NaN errors at padding steps.
     """
     def __init__(self, d_h: int, K: int, k_warmup: int = 5, alpha_max: float = 0.5):
         super().__init__()
@@ -167,16 +170,25 @@ class NeuralCATDecoder(nn.Module):
         self.k_warmup = k_warmup
         self.alpha_max = alpha_max
         
-        # Initial ability state parameter (K, d_h)
-        self.theta_0 = nn.Parameter(torch.zeros(K, d_h))
+        # We allocate K + 1 parameters, where index K is a dummy concept reserved for padding.
+        self.theta_0 = nn.Parameter(torch.zeros(K + 1, d_h))
         # Initialized with small random values to break symmetry
         nn.init.normal_(self.theta_0, mean=0.0, std=0.02)
         
-        # Feed-forward network to predict changes in ability
-        self.ffn = nn.Sequential(
+        # Context pre-projector: projects h_t to d_h
+        self.proj_h = nn.Sequential(
             nn.Linear(d_h, d_h),
+            nn.ReLU()
+        )
+        
+        # Concept embeddings: represents each concept in the joint space (K + 1 elements)
+        self.concept_embedding = nn.Embedding(K + 1, d_h)
+        
+        # Non-linear candidate generator: maps concatenated context + concept embedding back to d_h
+        self.candidate_generator = nn.Sequential(
+            nn.Linear(2 * d_h, d_h),
             nn.ReLU(),
-            nn.Linear(d_h, K * d_h)
+            nn.Linear(d_h, d_h)
         )
 
     def _get_damping_schedule(self, seq_len: int, device: torch.device) -> torch.Tensor:
@@ -191,98 +203,154 @@ class NeuralCATDecoder(nn.Module):
             (t / self.k_warmup) * self.alpha_max,
             (1.0 / torch.sqrt(t - self.k_warmup + 1)) * self.alpha_max
         )
-        # Reshape to (1, SeqLen, 1, 1) for broadcasting
-        return alpha.view(1, -1, 1, 1)
+        return alpha
 
-    def forward(self, h: torch.Tensor, Q: torch.Tensor, padding_mask: torch.Tensor | None = None):
+    def forward(self, h: torch.Tensor, concept_indices: torch.Tensor, padding_mask: torch.Tensor | None = None):
         """
         Args:
             h: Context sequence, shape (B, T, d_h)
-            Q: Binary Q-matrix sequence, shape (B, T, K)
-            padding_mask: Padding boolean mask, shape (B, T) where True indicates valid, False indicates padding
+            concept_indices: Active concept indices, shape (B, T, max_c) (padded with -1)
+            padding_mask: Padding boolean mask, shape (B, T)
         Returns:
-            theta: Cumulative ability states sequence, shape (B, T, K, d_h)
+            theta_pred_seq: Padded active ability states sequence for prediction, shape (B, T, max_c, d_h)
         """
         B, SeqLen, _ = h.shape
+        max_c = concept_indices.shape[2]
         
-        # 1. Predict capacity updates: shape (B, T, K * d_h) -> reshape to (B, T, K, d_h)
-        delta_theta_hat = self.ffn(h).view(B, SeqLen, self.K, self.d_h)
+        # Project Transformer context: (B, T, d_h)
+        h_projected = self.proj_h(h)
         
-        # 2. Hard Gating: only update skills active in the Q-matrix
-        # Expand Q to (B, T, K, 1) to match delta_theta_hat dimensions
-        delta_theta = Q.unsqueeze(-1) * delta_theta_hat
-        
-        # 3. Apply sequence padding mask to prevent padded steps from modifying abilities
-        if padding_mask is not None:
-            # Shape (B, T, 1, 1)
-            delta_theta = delta_theta * padding_mask.unsqueeze(-1).unsqueeze(-1).float()
-            
-        # 4. Compute Damping Factor alpha: shape (1, T, 1, 1)
+        # Get damping schedule
         alpha = self._get_damping_schedule(SeqLen, h.device)
         
-        # Apply damping factor
-        theta_updates = alpha * delta_theta
+        # Initialize theta sequence (B, K + 1, d_h)
+        theta_prev = self.theta_0.unsqueeze(0).expand(B, -1, -1)
+        theta_pred_list = []
         
-        # 5. Cumulative Sum over Time dimension
-        # Expand theta_0 to (B, 1, K, d_h) to add to the cumsum
-        theta_0_expanded = self.theta_0.view(1, 1, self.K, self.d_h).expand(B, -1, -1, -1)
-        theta = theta_0_expanded + torch.cumsum(theta_updates, dim=1)
-        
-        return theta
+        for t in range(SeqLen):
+            # Extract concepts active at step t: shape (B, max_c)
+            c_indices_t = concept_indices[:, t]
+            valid_mask_t = (c_indices_t != -1) # (B, max_c)
+            
+            # Map invalid (-1) to dummy index K to avoid index errors and 
+            # prevent overwriting index 0 with invalid/unupdated padding values.
+            safe_indices_t = torch.where(valid_mask_t, c_indices_t, self.K)
+            safe_indices_expanded = safe_indices_t.unsqueeze(-1).expand(-1, -1, self.d_h)
+            
+            # Gather theta_prev at active concepts: shape (B, max_c, d_h)
+            theta_selected_t = torch.gather(theta_prev, dim=1, index=safe_indices_expanded)
+            theta_pred_list.append(theta_selected_t)
+            
+            # Calculate new candidate theta update modulated by concept embeddings
+            c_emb = self.concept_embedding(safe_indices_t) # (B, max_c, d_h)
+            h_proj_t = h_projected[:, t, :] # (B, d_h)
+            
+            # Concatenate context with concept embedding for non-linear interactions
+            h_expanded = h_proj_t.unsqueeze(1).expand(-1, max_c, -1) # (B, max_c, d_h)
+            fused_input = torch.cat([h_expanded, c_emb], dim=-1) # (B, max_c, 2 * d_h)
+            theta_cand_t = self.candidate_generator(fused_input) # (B, max_c, d_h)
+            
+            # Decay factor computation
+            alpha_t = alpha[t]
+            if padding_mask is not None:
+                mask_t = padding_mask[:, t].view(-1, 1, 1).float() # (B, 1, 1)
+                decay_t = alpha_t * valid_mask_t.unsqueeze(-1).float() * mask_t # (B, max_c, 1)
+            else:
+                decay_t = alpha_t * valid_mask_t.unsqueeze(-1).float() # (B, max_c, 1)
+                
+            # EMA Update
+            # We use torch.where to ONLY calculate the update when decay_t > 0.
+            # This prevents 0 * NaN = NaN from occurring at padding positions where h_proj_t contains NaN.
+            theta_update = torch.where(
+                decay_t > 0,
+                (1.0 - decay_t) * theta_selected_t + decay_t * theta_cand_t,
+                theta_selected_t
+            )
+            
+            # Scatter back to update theta_prev (functional to allow backward pass)
+            theta_prev = theta_prev.scatter(dim=1, index=safe_indices_expanded, src=theta_update)
+            
+        # Stack predictions for all time steps
+        theta_pred_seq = torch.stack(theta_pred_list, dim=1) # (B, T, max_c, d_h)
+        return theta_pred_seq
 
 
 class NeuralCATPredictor(nn.Module):
     """
-    Block 5: Hybrid 4PL Predictor
+    Block 5: Hybrid 4PL Predictor using Attention mechanism to enforce Monotonicity.
     Predicts the response probability for the next question using prior ability state,
-    target question embeddings, guessing/slip parameters, and skills weights.
+    target question embeddings, guessing/slip parameters, and attention-based skill weights.
+    Optimized for sparse active concept states.
     """
     def __init__(self, d_x: int, d_h: int):
         super().__init__()
-        # MLP for predicting target ability difference
-        self.mlp_delta = nn.Sequential(
-            nn.Linear(d_h + d_x, d_h),
-            nn.ReLU(),
-            nn.Linear(d_h, 1)
-        )
+        self.d_h = d_h
+        
+        # Projections for Attention
+        self.proj_q = nn.Linear(d_x, d_h)
+        self.proj_k = nn.Linear(d_h, d_h)
+        
+        # Projection to estimate skill mastery (scalar in R)
+        self.proj_mastery = nn.Linear(d_h, 1)
+        
+        # Projection to estimate question difficulty (scalar in R)
+        self.proj_diff = nn.Linear(d_x, 1)
 
-    def forward(self, theta_pred: torch.Tensor, x: torch.Tensor, Q: torch.Tensor, g: torch.Tensor, s: torch.Tensor):
+    def forward(self, theta_pred: torch.Tensor, x: torch.Tensor, concept_indices: torch.Tensor, g: torch.Tensor, s: torch.Tensor):
         """
         Args:
-            theta_pred: Prior ability matrix, shape (B, T, K, d_h)
+            theta_pred: Prior ability matrix, shape (B, T, max_c, d_h)
             x: Target question embeddings, shape (B, T, d_x)
-            Q: Target Q-matrix, shape (B, T, K) (binary)
+            concept_indices: Target active concept indices, shape (B, T, max_c) (padded with -1)
             g: Guessing parameters for target questions, shape (B, T)
             s: Slip parameters for target questions, shape (B, T)
         Returns:
-            P: Predicted correct probability, shape (B, T)
+            logits: Predicted correct log-odds, shape (B, T)
             delta: Ability difference, shape (B, T)
         """
-        # 1. Normalize binary Q-matrix rows to compute skill weights (beta)
-        # Avoid division by zero by adding a small epsilon
-        q_sum = Q.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-        beta = Q / q_sum  # Weight distribution: (B, T, K)
+        # 1. Compute Query and Key for Attention
+        query = self.proj_q(x)  # (B, T, d_h)
+        key = self.proj_k(theta_pred)  # (B, T, max_c, d_h)
         
-        # 2. Targeted Ability: linear combination of ability weights
-        # beta shape: (B, T, 1, K) x theta_pred shape: (B, T, K, d_h) -> S shape: (B, T, 1, d_h) -> squeeze to (B, T, d_h)
-        S = torch.matmul(beta.unsqueeze(-2), theta_pred).squeeze(-2)
+        # 2. Compute attention scores (Query * Key)
+        # query.unsqueeze(-1) shape: (B, T, d_h, 1)
+        # key shape: (B, T, max_c, d_h)
+        # product shape: (B, T, max_c, 1) -> squeeze to (B, T, max_c)
+        scores = torch.matmul(key, query.unsqueeze(-1)).squeeze(-1)
+        scores = scores / (self.d_h ** 0.5)
         
-        # 3. Ability difference (delta)
-        # Concat targeted ability S and target question features x
-        S_x = torch.cat([S, x], dim=-1)  # (B, T, d_h + d_x)
-        delta = self.mlp_delta(S_x).squeeze(-1)  # (B, T)
+        # 3. Mask scores using active concept mask (only attend to valid concepts)
+        valid_mask = (concept_indices != -1) # (B, T, max_c)
+        scores = scores.masked_fill(~valid_mask, -1e9)
+        beta = F.softmax(scores, dim=-1)  # (B, T, max_c)
         
-        # 4. Apply 4PL IRT formula:
-        # K = sigmoid(delta)
-        # P = g + (1 - s - g) * K
+        # 4. Predict student's mastery for each skill
+        mastery = self.proj_mastery(theta_pred).squeeze(-1)  # (B, T, max_c)
+        
+        # 5. Targeted Ability: weighted sum of masteries
+        targeted_ability = (beta * mastery).sum(dim=-1)  # (B, T)
+        
+        # 6. Question Difficulty
+        difficulty = self.proj_diff(x).squeeze(-1)  # (B, T)
+        
+        # 7. Ability difference (delta)
+        delta = targeted_ability - difficulty  # (B, T)
+        
+        # 8. Apply 4PL IRT formula:
+        # P = g + (1 - s - g) * Sigmoid(delta)
         K_prob = torch.sigmoid(delta)
         P = g + (1.0 - s - g) * K_prob
-        return P, delta
+        
+        # Convert probability to log-odds (logits) to ensure numerical stability in BCE loss
+        P_clamped = torch.clamp(P, min=1e-7, max=1.0 - 1e-7)
+        logits = torch.log(P_clamped) - torch.log1p(-P_clamped)
+        
+        return logits, delta
 
 
 class NeuralCATEngine(nn.Module):
     """
-    Combined Neural CAT Engine Model
+    Combined Neural CAT Engine Model (Optimized Version)
     """
     def __init__(self, d_x: int, d_time: int, d_h: int, K: int, 
                  nhead: int = 4, num_layers: int = 2, max_seq_len: int = 200, 
@@ -304,22 +372,20 @@ class NeuralCATEngine(nn.Module):
         )
         self.predictor = NeuralCATPredictor(d_x=d_x, d_h=d_h)
 
-    def forward(self, x: torch.Tensor, r: torch.Tensor, T_time: torch.Tensor, Q: torch.Tensor, padding_mask: torch.Tensor | None = None, g_priors: torch.Tensor | None = None):
+    def forward(self, x: torch.Tensor, r: torch.Tensor, T_time: torch.Tensor, concept_indices: torch.Tensor, padding_mask: torch.Tensor | None = None, g_priors: torch.Tensor | None = None):
         """
         Args:
             x: Sequence of question embeddings, shape (B, T, d_x)
             r: Sequence of raw responses, shape (B, T)
             T_time: Sequence of response times, shape (B, T)
-            Q: Sequence of binary Q-matrices, shape (B, T, K)
+            concept_indices: Active concept indices, shape (B, T, max_c)
             padding_mask: Boolean mask indicating valid steps (B, T)
             g_priors: Prior guessing rates, shape (B, T)
         Returns:
-            P: Predictions for response sequence, shape (B, T)
+            logits: Predictions for response sequence (log-odds), shape (B, T)
             g: Guessing parameters, shape (B, T)
             s: Slip parameters, shape (B, T)
         """
-        B, SeqLen, _ = x.shape
-        
         # 1. Block 1: 4PL Input Refiner
         r_soft, g, s = self.refiner(x, r, g_priors)
         
@@ -329,16 +395,10 @@ class NeuralCATEngine(nn.Module):
         # 3. Block 3: Sequence Modeling
         h = self.sequence_model(I, padding_mask=padding_mask)
         
-        # 4. Block 4: Decoding Head & Ability Update
-        theta = self.decoder(h, Q, padding_mask=padding_mask)
+        # 4. Block 4: Decoding Head & Ability Update (returns shift-aligned theta sequence)
+        theta_pred = self.decoder(h, concept_indices, padding_mask=padding_mask)
         
-        # Shift abilities to align with predicting the NEXT question.
-        # At step t, we use theta_{t-1} to predict answer to question t.
-        # (This means we concatenate self.decoder.theta_0 at index 0)
-        theta_0_expanded = self.decoder.theta_0.view(1, 1, self.decoder.K, self.decoder.d_h).expand(B, -1, -1, -1)
-        theta_pred = torch.cat([theta_0_expanded, theta[:, :-1, :, :]], dim=1)
+        # 5. Block 5: Predict output logits
+        logits, delta = self.predictor(theta_pred, x, concept_indices, g, s)
         
-        # 5. Block 5: Predict output
-        P, delta = self.predictor(theta_pred, x, Q, g, s)
-        
-        return P, g, s
+        return logits, g, s

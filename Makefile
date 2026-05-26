@@ -2,7 +2,7 @@
 # DEVELOPMENT TOOLING AND ENVIRONMENT MANAGEMENT
 # ==============================================================================
 
-.PHONY: help up down run migrate migration lint format check-types train-base train-optimized eval eval-ckpt compare test plot clean
+.PHONY: help up down run migrate migration lint format check-types train-base train-optimized eval eval-ckpt compare test plot clean ui
 
 # Default variables for model training/evaluation
 EPOCHS ?= 50
@@ -60,32 +60,30 @@ run: ## Run the local FastAPI development server
 	@echo "Starting FastAPI server..."
 	uv run uvicorn app.main:app --reload
 
-train-base: ## Train the baseline Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=32 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10)
-	uv run python3 scripts/train_neural_cat.py --model_type base --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE)
+train-base: ## Train the baseline Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=256 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10)
+	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py --model_type base --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE) --precision bf16-mixed --compile
 
-train-optimized: ## Train the optimized Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=32 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10)
-	uv run python3 scripts/train_neural_cat.py --model_type optimized --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE)
+train-optimized: ## Train the optimized Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=256 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10)
+	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py --model_type optimized --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE) --precision bf16-mixed --compile
 
 eval: ## Evaluate the best checkpoint (auto-selected lowest validation loss)
-	uv run python3 scripts/evaluate_neural_cat.py
+	PYTHONPATH=. uv run python3 scripts/evaluate_neural_cat.py
 
 eval-ckpt: ## Evaluate a specific checkpoint (Usage: make eval-ckpt CHECKPOINT=<path_to_ckpt>)
 	@if [ -z "$(CHECKPOINT)" ]; then \
 		echo "Error: Please specify CHECKPOINT=<path_to_ckpt>"; \
 		exit 1; \
 	fi
-	uv run python3 scripts/evaluate_neural_cat.py --checkpoint_path $(CHECKPOINT)
+	PYTHONPATH=. uv run python3 scripts/evaluate_neural_cat.py --checkpoint_path $(CHECKPOINT)
 
 compare: ## Compare all evaluated models and update reports
-	uv run python3 scripts/compare_models.py
+	PYTHONPATH=. uv run python3 scripts/compare_models.py
 
-test: ## Run unit tests for both base and optimized models
-	PYTHONPATH=src uv run python3 tests/test_neural_cat.py
-	PYTHONPATH=src uv run python3 tests/test_neural_cat_optimized.py
 
 plot: ## Plot training/validation loss curves from the latest log
-	uv run python3 scripts/plot_loss.py
+	PYTHONPATH=. uv run python3 scripts/plot_loss.py
 
-clean: ## Remove temporary caches and pytest directory
-	rm -rf .pytest_cache
-	find . -type d -name "__pycache__" -exec rm -r {} +
+
+ui:
+	PYTHONPATH=. uv run streamlit run app/infrastructure/streamlit/streamlit.py
+

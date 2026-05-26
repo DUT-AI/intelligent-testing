@@ -3,7 +3,7 @@ from dishka.integrations.fastapi import FromDishka, inject
 
 from app.use_cases.user.create_user import CreateUserUseCase
 from app.use_cases.user.get_user import GetUserUseCase
-from app.infrastructure.web.schemas import UserCreateRequest, UserResponse
+from app.infrastructure.api.schemas import UserCreateRequest, UserResponse
 
 router = APIRouter(prefix="/users", tags=["Users"])
 

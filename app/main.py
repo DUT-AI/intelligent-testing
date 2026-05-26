@@ -3,7 +3,7 @@ import uvicorn
 from dishka import make_container
 from dishka.integrations.fastapi import setup_dishka
 
-from app.infrastructure.web.routers import router as user_router
+from app.infrastructure.api.routers import router as user_router
 from app.infrastructure.di import AppProvider
 
 # Initialize the main FastAPI application

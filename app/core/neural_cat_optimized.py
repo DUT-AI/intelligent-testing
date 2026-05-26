@@ -2,13 +2,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from intelligent_testing.models.neural_cat import (
-    NeuralCATRefiner,
-    NeuralCATEmbedding,
-    NeuralCATSequenceModel,
+from app.core.neural_cat import (
     NeuralCATDecoder,
-    NeuralCATPredictor
+    NeuralCATEmbedding,
+    NeuralCATPredictor,
+    NeuralCATRefiner,
+    NeuralCATSequenceModel,
 )
+
 
 class QuestionFeatureFusion(nn.Module):
     """
@@ -82,7 +83,7 @@ class NeuralCATEngineOptimized(nn.Module):
         self.predictor = NeuralCATPredictor(d_x=self.d_x, d_h=d_h)
 
     def forward(self, x_emb: torch.Tensor, x_feat: torch.Tensor, r: torch.Tensor, 
-                T_time: torch.Tensor, Q: torch.Tensor, padding_mask: torch.Tensor | None = None,
+                T_time: torch.Tensor, concept_indices: torch.Tensor, padding_mask: torch.Tensor | None = None,
                 g_priors: torch.Tensor | None = None):
         """
         Args:
@@ -90,16 +91,14 @@ class NeuralCATEngineOptimized(nn.Module):
             x_feat: Sequence of tabular question features, shape (B, T, d_features)
             r: Sequence of raw responses, shape (B, T)
             T_time: Sequence of response times, shape (B, T)
-            Q: Sequence of binary Q-matrices, shape (B, T, K)
+            concept_indices: Active concept indices, shape (B, T, max_c)
             padding_mask: Boolean mask indicating valid steps (B, T)
             g_priors: Prior guessing rates, shape (B, T)
         Returns:
-            P: Predictions for response sequence, shape (B, T)
+            logits: Predictions for response sequence (log-odds), shape (B, T)
             g: Guessing parameters, shape (B, T)
             s: Slip parameters, shape (B, T)
         """
-        B, SeqLen, _ = x_emb.shape
-        
         # 1. Fuse embeddings and tabular features
         x = self.fusion(x_emb, x_feat)  # (B, T, d_x)
         
@@ -112,14 +111,10 @@ class NeuralCATEngineOptimized(nn.Module):
         # 4. Block 3: Sequence Modeling
         h = self.sequence_model(I, padding_mask=padding_mask)
         
-        # 5. Block 4: Decoding Head & Ability Update
-        theta = self.decoder(h, Q, padding_mask=padding_mask)
+        # 5. Block 4: Decoding Head & Ability Update (returns shift-aligned theta sequence)
+        theta_pred = self.decoder(h, concept_indices, padding_mask=padding_mask)
         
-        # Shift abilities to align with predicting the NEXT question.
-        theta_0_expanded = self.decoder.theta_0.view(1, 1, self.decoder.K, self.decoder.d_h).expand(B, -1, -1, -1)
-        theta_pred = torch.cat([theta_0_expanded, theta[:, :-1, :, :]], dim=1)
+        # 6. Block 5: Predict output logits
+        logits, delta = self.predictor(theta_pred, x, concept_indices, g, s)
         
-        # 6. Block 5: Predict output
-        P, delta = self.predictor(theta_pred, x, Q, g, s)
-        
-        return P, g, s
+        return logits, g, s

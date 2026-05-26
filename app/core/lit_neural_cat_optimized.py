@@ -1,8 +1,10 @@
+import lightning as L
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import lightning as L
-from intelligent_testing.models.neural_cat_optimized import NeuralCATEngineOptimized
+
+from app.core.neural_cat_optimized import NeuralCATEngineOptimized
+
 
 class LitNeuralCATOptimized(L.LightningModule):
     """
@@ -43,18 +45,16 @@ class LitNeuralCATOptimized(L.LightningModule):
         self.lambda_reg = lambda_reg
 
     def forward(self, x_emb: torch.Tensor, x_feat: torch.Tensor, r: torch.Tensor, 
-                T_time: torch.Tensor, Q: torch.Tensor, padding_mask: torch.Tensor | None = None,
+                T_time: torch.Tensor, concept_indices: torch.Tensor, padding_mask: torch.Tensor | None = None,
                 g_priors: torch.Tensor | None = None):
-        return self.model(x_emb, x_feat, r, T_time, Q, padding_mask, g_priors)
+        return self.model(x_emb, x_feat, r, T_time, concept_indices, padding_mask, g_priors)
 
-    def _compute_loss(self, P: torch.Tensor, r: torch.Tensor, g: torch.Tensor, s: torch.Tensor, padding_mask: torch.Tensor | None = None, g_priors: torch.Tensor | None = None):
+    def _compute_loss(self, logits: torch.Tensor, r: torch.Tensor, g: torch.Tensor, s: torch.Tensor, padding_mask: torch.Tensor | None = None, g_priors: torch.Tensor | None = None):
         """
         Computes masked Binary Cross Entropy and L2 regularization loss for guessing and slip parameters.
         """
-        # 1. Binary Cross Entropy Loss
-        # Clamp predictions to avoid log(0) issues
-        P_clamped = torch.clamp(P, min=1e-7, max=1.0 - 1e-7)
-        bce_loss_raw = F.binary_cross_entropy(P_clamped, r.float(), reduction='none')
+        # 1. Binary Cross Entropy Loss using logits (autocast-safe)
+        bce_loss_raw = F.binary_cross_entropy_with_logits(logits, r.float(), reduction='none')
         
         # 2. Regularization Loss: penalize deviation from g_prior (guessing) and large values of slip (s)
         if g_priors is not None:
@@ -75,15 +75,15 @@ class LitNeuralCATOptimized(L.LightningModule):
         return total_loss, bce_loss, reg_loss
 
     def training_step(self, batch, batch_idx):
-        x_emb, x_feat, r, T_time, Q, *rest = batch
+        x_emb, x_feat, r, T_time, concept_indices, *rest = batch
         padding_mask = rest[0] if len(rest) > 0 else None
         g_priors = rest[1] if len(rest) > 1 else None
         
         # Forward pass
-        P, g, s = self(x_emb, x_feat, r, T_time, Q, padding_mask, g_priors)
+        logits, g, s = self(x_emb, x_feat, r, T_time, concept_indices, padding_mask, g_priors)
         
         # Compute loss
-        loss, bce, reg = self._compute_loss(P, r, g, s, padding_mask, g_priors)
+        loss, bce, reg = self._compute_loss(logits, r, g, s, padding_mask, g_priors)
         
         # Log training metrics
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
@@ -93,17 +93,18 @@ class LitNeuralCATOptimized(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x_emb, x_feat, r, T_time, Q, *rest = batch
+        x_emb, x_feat, r, T_time, concept_indices, *rest = batch
         padding_mask = rest[0] if len(rest) > 0 else None
         g_priors = rest[1] if len(rest) > 1 else None
         
         # Forward pass
-        P, g, s = self(x_emb, x_feat, r, T_time, Q, padding_mask, g_priors)
+        logits, g, s = self(x_emb, x_feat, r, T_time, concept_indices, padding_mask, g_priors)
         
         # Compute loss
-        loss, bce, reg = self._compute_loss(P, r, g, s, padding_mask, g_priors)
+        loss, bce, reg = self._compute_loss(logits, r, g, s, padding_mask, g_priors)
         
         # Compute accuracy (masked if padding_mask is present)
+        P = torch.sigmoid(logits)
         preds = (P >= 0.5).float()
         correct = (preds == r.float()).float()
         
