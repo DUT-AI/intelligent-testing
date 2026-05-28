@@ -25,10 +25,12 @@ class StudentSequenceDataset(Dataset):
         question_option_counts=None,
         max_seq_len=200,
         K=1175,
+        return_indices=False,
     ):
         self.max_seq_len = max_seq_len
         self.K = K
         self.question_features = question_features
+        self.return_indices = return_indices
 
         # 1. Build question ID to matrix index mapping
         # Index 0 is reserved for padding question (all zeros)
@@ -78,6 +80,13 @@ class StudentSequenceDataset(Dataset):
                 feat = question_features.get(q_id)
                 if feat is not None:
                     self.question_features_matrix[idx] = feat
+
+        # Pre-convert numpy matrices to PyTorch Tensors to avoid on-the-fly conversion overhead in __getitem__
+        self.question_embeddings_matrix = torch.from_numpy(self.question_embeddings_matrix)
+        self.question_concepts_matrix = torch.from_numpy(self.question_concepts_matrix)
+        self.question_g_priors = torch.from_numpy(self.question_g_priors)
+        if question_features is not None:
+            self.question_features_matrix = torch.from_numpy(self.question_features_matrix)
 
         # 4. Pre-parse sequences to list of integer indices (O(1) RAM friendly)
         print("Pre-parsing student sequences...")
@@ -146,34 +155,42 @@ class StudentSequenceDataset(Dataset):
     def __getitem__(self, index):
         item = self.processed[index]
         q_indices = item["q_indices"]
-        
-        # O(1) Vectorized lookup
-        x = self.question_embeddings_matrix[q_indices]
         r = item["r_arr"]
         T_time = item["time_arr"]
-        concept_indices = self.question_concepts_matrix[q_indices]
         padding_mask = item["mask_arr"]
+
+        if self.return_indices:
+            return (
+                torch.from_numpy(q_indices),
+                torch.from_numpy(r),
+                torch.from_numpy(T_time),
+                torch.from_numpy(padding_mask),
+            )
+        
+        # O(1) Vectorized lookup directly on CPU Tensors (compatible fallback)
+        x = self.question_embeddings_matrix[q_indices]
+        concept_indices = self.question_concepts_matrix[q_indices]
         g_priors = self.question_g_priors[q_indices]
         
         if self.question_features is not None:
             x_feat = self.question_features_matrix[q_indices]
             return (
-                torch.from_numpy(x),
-                torch.from_numpy(x_feat),
+                x,
+                x_feat,
                 torch.from_numpy(r),
                 torch.from_numpy(T_time),
-                torch.from_numpy(concept_indices),
+                concept_indices,
                 torch.from_numpy(padding_mask),
-                torch.from_numpy(g_priors),
+                g_priors,
             )
         else:
             return (
-                torch.from_numpy(x),
+                x,
                 torch.from_numpy(r),
                 torch.from_numpy(T_time),
-                torch.from_numpy(concept_indices),
+                concept_indices,
                 torch.from_numpy(padding_mask),
-                torch.from_numpy(g_priors),
+                g_priors,
             )
 
 
@@ -253,6 +270,101 @@ def parse_args():
         help="Number of epochs to wait with no validation loss improvement before early stopping",
     )
     return parser.parse_args()
+
+
+class GPULitNeuralCAT(LitNeuralCAT):
+    def __init__(self, question_embeddings, question_concepts, question_g_priors, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.register_buffer("question_embeddings_tbl", question_embeddings)
+        self.register_buffer("question_concepts_tbl", question_concepts)
+        self.register_buffer("question_g_priors_tbl", question_g_priors)
+
+    def training_step(self, batch, batch_idx):
+        q_indices, r, T_time, padding_mask = batch
+        x = self.question_embeddings_tbl[q_indices]
+        concept_indices = self.question_concepts_tbl[q_indices]
+        g_priors = self.question_g_priors_tbl[q_indices]
+        
+        logits, g, s = self(x, r, T_time, concept_indices, padding_mask, g_priors)
+        loss, bce, reg = self._compute_loss(logits, r, g, s, padding_mask, g_priors)
+        
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("train_bce_loss", bce, on_step=False, on_epoch=True, logger=True)
+        self.log("train_reg_loss", reg, on_step=False, on_epoch=True, logger=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        q_indices, r, T_time, padding_mask = batch
+        x = self.question_embeddings_tbl[q_indices]
+        concept_indices = self.question_concepts_tbl[q_indices]
+        g_priors = self.question_g_priors_tbl[q_indices]
+        
+        logits, g, s = self(x, r, T_time, concept_indices, padding_mask, g_priors)
+        loss, bce, reg = self._compute_loss(logits, r, g, s, padding_mask, g_priors)
+        
+        P = torch.sigmoid(logits)
+        preds = (P >= 0.5).float()
+        correct = (preds == r.float()).float()
+        
+        if padding_mask is not None:
+            mask_float = padding_mask.float()
+            acc = (correct * mask_float).sum() / mask_float.sum().clamp(min=1.0)
+        else:
+            acc = correct.mean()
+            
+        self.log("val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val_bce_loss", bce, on_epoch=True, logger=True)
+        self.log("val_acc", acc, on_epoch=True, prog_bar=True, logger=True)
+        return {"val_loss": loss, "val_acc": acc}
+
+
+class GPULitNeuralCATOptimized(LitNeuralCATOptimized):
+    def __init__(self, question_embeddings, question_concepts, question_g_priors, question_features, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.register_buffer("question_embeddings_tbl", question_embeddings)
+        self.register_buffer("question_concepts_tbl", question_concepts)
+        self.register_buffer("question_g_priors_tbl", question_g_priors)
+        self.register_buffer("question_features_tbl", question_features)
+
+    def training_step(self, batch, batch_idx):
+        q_indices, r, T_time, padding_mask = batch
+        x_emb = self.question_embeddings_tbl[q_indices]
+        x_feat = self.question_features_tbl[q_indices]
+        concept_indices = self.question_concepts_tbl[q_indices]
+        g_priors = self.question_g_priors_tbl[q_indices]
+        
+        logits, g, s = self(x_emb, x_feat, r, T_time, concept_indices, padding_mask, g_priors)
+        loss, bce, reg = self._compute_loss(logits, r, g, s, padding_mask, g_priors)
+        
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("train_bce_loss", bce, on_step=False, on_epoch=True, logger=True)
+        self.log("train_reg_loss", reg, on_step=False, on_epoch=True, logger=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        q_indices, r, T_time, padding_mask = batch
+        x_emb = self.question_embeddings_tbl[q_indices]
+        x_feat = self.question_features_tbl[q_indices]
+        concept_indices = self.question_concepts_tbl[q_indices]
+        g_priors = self.question_g_priors_tbl[q_indices]
+        
+        logits, g, s = self(x_emb, x_feat, r, T_time, concept_indices, padding_mask, g_priors)
+        loss, bce, reg = self._compute_loss(logits, r, g, s, padding_mask, g_priors)
+        
+        P = torch.sigmoid(logits)
+        preds = (P >= 0.5).float()
+        correct = (preds == r.float()).float()
+        
+        if padding_mask is not None:
+            mask_float = padding_mask.float()
+            acc = (correct * mask_float).sum() / mask_float.sum().clamp(min=1.0)
+        else:
+            acc = correct.mean()
+            
+        self.log("val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val_bce_loss", bce, on_epoch=True, logger=True)
+        self.log("val_acc", acc, on_epoch=True, prog_bar=True, logger=True)
+        return {"val_loss": loss, "val_acc": acc}
 
 
 def main():
@@ -386,6 +498,7 @@ def main():
         question_option_counts=question_option_counts,
         max_seq_len=args.max_seq_len,
         K=K_val,
+        return_indices=True,
     )
     val_dataset = StudentSequenceDataset(
         sequences=val_sequences,
@@ -395,6 +508,7 @@ def main():
         question_option_counts=question_option_counts,
         max_seq_len=args.max_seq_len,
         K=K_val,
+        return_indices=True,
     )
 
     train_loader = DataLoader(
@@ -404,6 +518,7 @@ def main():
         num_workers=args.num_workers,
         pin_memory=True,
         persistent_workers=True if args.num_workers > 0 else False,
+        prefetch_factor=4 if args.num_workers > 0 else None,
         drop_last=True,
     )
     val_loader = DataLoader(
@@ -413,12 +528,17 @@ def main():
         num_workers=args.num_workers,
         pin_memory=True,
         persistent_workers=True if args.num_workers > 0 else False,
+        prefetch_factor=4 if args.num_workers > 0 else None,
     )
 
     # 3. Instantiate model
     print(f"Initializing model (type: {args.model_type}) with K={K_val}...")
     if args.model_type == "optimized":
-        model = LitNeuralCATOptimized(
+        model = GPULitNeuralCATOptimized(
+            question_embeddings=train_dataset.question_embeddings_matrix,
+            question_concepts=train_dataset.question_concepts_matrix,
+            question_g_priors=train_dataset.question_g_priors,
+            question_features=train_dataset.question_features_matrix,
             d_embedding=1024,
             d_features=22,
             d_time=32,
@@ -432,7 +552,10 @@ def main():
         )
         ckpt_filename = "best-neural-cat-optimized"
     else:
-        model = LitNeuralCAT(
+        model = GPULitNeuralCAT(
+            question_embeddings=train_dataset.question_embeddings_matrix,
+            question_concepts=train_dataset.question_concepts_matrix,
+            question_g_priors=train_dataset.question_g_priors,
             d_x=1024,
             d_time=32,
             d_h=128,
