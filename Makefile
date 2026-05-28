@@ -6,11 +6,14 @@
 
 # Default variables for model training/evaluation
 EPOCHS ?= 50
-BATCH_SIZE ?= 64
+BATCH_SIZE ?= 256
 MAX_SEQ_LEN ?= 50
 CHECKPOINT ?= ""
 RESUME ?= 
 PATIENCE ?= 10
+LR ?= 1e-3
+NUM_LAYERS ?= 4
+NHEAD ?= 4
 
 help: ## Show this help message
 	@echo "Available commands:"
@@ -60,11 +63,11 @@ run: ## Run the local FastAPI development server
 	@echo "Starting FastAPI server..."
 	uv run uvicorn app.main:app --reload
 
-train-base: ## Train the baseline Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=256 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10)
-	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py --model_type base --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE) --precision bf16-mixed --compile
+train-base: ## Train the baseline Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=256 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10 LR=1e-3 NUM_LAYERS=4 NHEAD=4)
+	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py --model_type base --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE) --precision bf16-mixed --compile --lr $(LR) --num_layers $(NUM_LAYERS) --nhead $(NHEAD)
 
-train-optimized: ## Train the optimized Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=256 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10)
-	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py --model_type optimized --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE) --precision bf16-mixed --compile
+train-optimized: ## Train the optimized Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=256 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10 LR=1e-3 NUM_LAYERS=4 NHEAD=4)
+	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py --model_type optimized --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE) --precision bf16-mixed --compile --lr $(LR) --num_layers $(NUM_LAYERS) --nhead $(NHEAD)
 
 eval: ## Evaluate the best checkpoint (auto-selected lowest validation loss)
 	PYTHONPATH=. uv run python3 scripts/evaluate_neural_cat.py

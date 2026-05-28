@@ -62,26 +62,30 @@ class SQLAlchemyQuestionRepository(QuestionRepositoryPort):
                 feat_vec = None
                 if q.features is not None or q.misconceptions is not None:
                     feat_vec = []
+                    
+                    def safe_float(v):
+                        return float(v) if v is not None else 0.0
+                        
                     # Linguistic / syntactic features (17 features)
                     if q.features is not None:
                         feat_vec.extend([
-                            float(q.features.word_count),
-                            float(q.features.avg_word_length),
-                            float(q.features.avg_sentence_length),
-                            float(q.features.vocab_difficulty),
-                            float(q.features.syntactic_complexity),
-                            float(q.features.p_concrete),
-                            float(q.features.p_symbol),
-                            float(q.features.p_abstract),
-                            float(q.features.inference_steps),
-                            float(q.features.q1_tinhtoan),
-                            float(q.features.q2_lythuyetso),
-                            float(q.features.q3_hinhhoc),
-                            float(q.features.q4_chuyendong),
-                            float(q.features.q5_toandokinhdien),
-                            float(q.features.q6_tonghieuti),
-                            float(q.features.q7_dem_tohop),
-                            float(q.features.q8_logic_trochoi)
+                            safe_float(q.features.word_count),
+                            safe_float(q.features.avg_word_length),
+                            safe_float(q.features.avg_sentence_length),
+                            safe_float(q.features.vocab_difficulty),
+                            safe_float(q.features.syntactic_complexity),
+                            safe_float(q.features.p_concrete),
+                            safe_float(q.features.p_symbol),
+                            safe_float(q.features.p_abstract),
+                            safe_float(q.features.inference_steps),
+                            safe_float(q.features.q1_tinhtoan),
+                            safe_float(q.features.q2_lythuyetso),
+                            safe_float(q.features.q3_hinhhoc),
+                            safe_float(q.features.q4_chuyendong),
+                            safe_float(q.features.q5_toandokinhdien),
+                            safe_float(q.features.q6_tonghieuti),
+                            safe_float(q.features.q7_dem_tohop),
+                            safe_float(q.features.q8_logic_trochoi)
                         ])
                     else:
                         feat_vec.extend([0.0] * 17)
@@ -89,11 +93,11 @@ class SQLAlchemyQuestionRepository(QuestionRepositoryPort):
                     # Misconception scores (5 features)
                     if q.misconceptions is not None:
                         feat_vec.extend([
-                            float(q.misconceptions.llm_arithmetic),
-                            float(q.misconceptions.llm_procedural),
-                            float(q.misconceptions.llm_conceptual),
-                            float(q.misconceptions.llm_lack_of_sense),
-                            float(q.misconceptions.llm_misconception_score)
+                            safe_float(q.misconceptions.llm_arithmetic),
+                            safe_float(q.misconceptions.llm_procedural),
+                            safe_float(q.misconceptions.llm_conceptual),
+                            safe_float(q.misconceptions.llm_lack_of_sense),
+                            safe_float(q.misconceptions.llm_misconception_score)
                         ])
                     else:
                         feat_vec.extend([0.0] * 5)

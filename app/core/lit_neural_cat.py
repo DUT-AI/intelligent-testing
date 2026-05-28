@@ -123,4 +123,30 @@ class LitNeuralCAT(L.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-4)
+        
+        try:
+            if self.trainer is not None:
+                # estimated_stepping_steps tự động tính toán tổng số batch steps trên toàn bộ epoch
+                total_steps = int(getattr(self.trainer, "estimated_stepping_steps", 0))
+                if total_steps > 0:
+                    scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                        optimizer,
+                        max_lr=self.lr,
+                        total_steps=total_steps,
+                        pct_start=0.1,  # 10% số bước đầu tiên dành cho Warmup
+                        anneal_strategy="cos", # Cosine Annealing ở các bước sau
+                        div_factor=25.0, # Bắt đầu từ lr = max_lr / 25
+                        final_div_factor=1000.0 # Kết thúc ở lr = max_lr / 1000
+                    )
+                    return {
+                        "optimizer": optimizer,
+                        "lr_scheduler": {
+                            "scheduler": scheduler,
+                            "interval": "step", # Cập nhật sau mỗi batch cập nhật (step)
+                            "frequency": 1
+                        }
+                    }
+        except Exception:
+            pass
+            
         return optimizer

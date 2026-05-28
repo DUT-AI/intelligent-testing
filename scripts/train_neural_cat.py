@@ -196,6 +196,12 @@ def parse_args():
     )
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument(
+        "--nhead", type=int, default=4, help="Number of attention heads"
+    )
+    parser.add_argument(
+        "--num_layers", type=int, default=4, help="Number of transformer layers"
+    )
+    parser.add_argument(
         "--lambda_reg",
         type=float,
         default=0.2,
@@ -418,39 +424,46 @@ def main():
             d_time=32,
             d_h=128,
             K=K_val,
-            nhead=8,
-            num_layers=4,
+            nhead=args.nhead,
+            num_layers=args.num_layers,
             max_seq_len=args.max_seq_len,
             lr=args.lr,
             lambda_reg=args.lambda_reg,
         )
-        ckpt_filename = "best-neural-cat-optimized-{epoch:02d}-{val_loss:.3f}"
+        ckpt_filename = "best-neural-cat-optimized"
     else:
-
         model = LitNeuralCAT(
             d_x=1024,
             d_time=32,
             d_h=128,
             K=K_val,
-            nhead=8,
-            num_layers=4,
+            nhead=args.nhead,
+            num_layers=args.num_layers,
             max_seq_len=args.max_seq_len,
             lr=args.lr,
             lambda_reg=args.lambda_reg,
         )
-        ckpt_filename = "best-neural-cat-{epoch:02d}-{val_loss:.3f}"
+        ckpt_filename = "best-neural-cat-base"
         
     if args.compile and hasattr(torch, "compile"):
         print("Compiling model for maximum GPU performance...")
         model = torch.compile(model)  # type: ignore
 
-    # 4. Define Checkpoint Callback
+    # 4. Define Checkpoint Callbacks
     checkpoint_callback = ModelCheckpoint(
         dirpath="checkpoints",
         filename=ckpt_filename,
         save_top_k=1,
         monitor="val_loss",
         mode="min",
+    )
+
+    last_ckpt_filename = f"last-neural-cat-{args.model_type}"
+    last_checkpoint_callback = ModelCheckpoint(
+        dirpath="checkpoints",
+        filename=last_ckpt_filename,
+        save_top_k=1,
+        monitor=None,
     )
 
     early_stop_callback = EarlyStopping(
@@ -472,7 +485,7 @@ def main():
         accelerator=device,
         devices=1 if device == "gpu" else "auto",
         precision=precision,
-        callbacks=[checkpoint_callback, early_stop_callback],
+        callbacks=[checkpoint_callback, last_checkpoint_callback, early_stop_callback],
         limit_train_batches=args.limit_train_batches,
         limit_val_batches=args.limit_val_batches,
         enable_progress_bar=True,

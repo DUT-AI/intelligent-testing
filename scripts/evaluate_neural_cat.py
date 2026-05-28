@@ -33,32 +33,55 @@ def main():
     
     # 1. Find the best checkpoint if not specified
     checkpoint_path = args.checkpoint_path
-    if not checkpoint_path:
-        ckpts = glob.glob("checkpoints/best-neural-cat-*.ckpt")
-        if not ckpts:
-            print("No checkpoints found in checkpoints/ directory.")
-            return
-        # Find checkpoint with lowest validation loss from filename
-        best_ckpt = None
-        min_loss = float('inf')
-        for ckpt in ckpts:
-            try:
-                loss_part = ckpt.split("val_loss=")[-1].replace(".ckpt", "")
-                loss_val = float(loss_part)
-                if loss_val < min_loss:
-                    min_loss = loss_val
-                    best_ckpt = ckpt
-            except Exception:
-                pass
-        if best_ckpt:
-            checkpoint_path = best_ckpt
-            print(f"Automatically selected best checkpoint: {checkpoint_path} (Val Loss: {min_loss})")
-        else:
-            checkpoint_path = sorted(ckpts)[-1]
-            print(f"Automatically selected latest checkpoint: {checkpoint_path}")
-
-    # Determine model type
+    
+    # Determine model type first if specified
     model_type = args.model_type
+    
+    if not checkpoint_path:
+        # Try fixed filenames first
+        if model_type == "optimized" and os.path.exists("checkpoints/best-neural-cat-optimized.ckpt"):
+            checkpoint_path = "checkpoints/best-neural-cat-optimized.ckpt"
+        elif model_type == "base" and os.path.exists("checkpoints/best-neural-cat-base.ckpt"):
+            checkpoint_path = "checkpoints/best-neural-cat-base.ckpt"
+        elif model_type == "auto":
+            # If auto, check optimized first, then base
+            if os.path.exists("checkpoints/best-neural-cat-optimized.ckpt"):
+                checkpoint_path = "checkpoints/best-neural-cat-optimized.ckpt"
+                model_type = "optimized"
+            elif os.path.exists("checkpoints/best-neural-cat-base.ckpt"):
+                checkpoint_path = "checkpoints/best-neural-cat-base.ckpt"
+                model_type = "base"
+                
+        # If still not found, fallback to glob search of old formats
+        if not checkpoint_path:
+            ckpts = glob.glob("checkpoints/best-neural-cat-*.ckpt")
+            if not ckpts:
+                print("No checkpoints found in checkpoints/ directory.")
+                return
+            
+            # Find checkpoint with lowest validation loss from filename
+            best_ckpt = None
+            min_loss = float('inf')
+            for ckpt in ckpts:
+                try:
+                    if "val_loss=" in ckpt:
+                        loss_part = ckpt.split("val_loss=")[-1].replace(".ckpt", "")
+                        if "_metrics" in loss_part:
+                            loss_part = loss_part.split("_metrics")[0]
+                        loss_val = float(loss_part)
+                        if loss_val < min_loss:
+                            min_loss = loss_val
+                            best_ckpt = ckpt
+                except Exception:
+                    pass
+            if best_ckpt:
+                checkpoint_path = best_ckpt
+                print(f"Automatically selected best checkpoint: {checkpoint_path} (Val Loss: {min_loss})")
+            else:
+                checkpoint_path = sorted(ckpts)[-1]
+                print(f"Automatically selected latest checkpoint: {checkpoint_path}")
+
+    # Determine model type if still auto
     if model_type == "auto":
         if "optimized" in checkpoint_path:
             model_type = "optimized"
@@ -95,26 +118,30 @@ def main():
             # Fetch tabular features if optimized model is used
             if model_type == "optimized" and question_features is not None:
                 feat_vec = []
+                
+                def safe_float(v):
+                    return float(v) if v is not None else 0.0
+                    
                 # 17 features from question_features
                 if q.features is not None:
                     feat_vec.extend([
-                        float(q.features.word_count),
-                        float(q.features.avg_word_length),
-                        float(q.features.avg_sentence_length),
-                        float(q.features.vocab_difficulty),
-                        float(q.features.syntactic_complexity),
-                        float(q.features.p_concrete),
-                        float(q.features.p_symbol),
-                        float(q.features.p_abstract),
-                        float(q.features.inference_steps),
-                        float(q.features.q1_tinhtoan),
-                        float(q.features.q2_lythuyetso),
-                        float(q.features.q3_hinhhoc),
-                        float(q.features.q4_chuyendong),
-                        float(q.features.q5_toandokinhdien),
-                        float(q.features.q6_tonghieuti),
-                        float(q.features.q7_dem_tohop),
-                        float(q.features.q8_logic_trochoi)
+                        safe_float(q.features.word_count),
+                        safe_float(q.features.avg_word_length),
+                        safe_float(q.features.avg_sentence_length),
+                        safe_float(q.features.vocab_difficulty),
+                        safe_float(q.features.syntactic_complexity),
+                        safe_float(q.features.p_concrete),
+                        safe_float(q.features.p_symbol),
+                        safe_float(q.features.p_abstract),
+                        safe_float(q.features.inference_steps),
+                        safe_float(q.features.q1_tinhtoan),
+                        safe_float(q.features.q2_lythuyetso),
+                        safe_float(q.features.q3_hinhhoc),
+                        safe_float(q.features.q4_chuyendong),
+                        safe_float(q.features.q5_toandokinhdien),
+                        safe_float(q.features.q6_tonghieuti),
+                        safe_float(q.features.q7_dem_tohop),
+                        safe_float(q.features.q8_logic_trochoi)
                     ])
                 else:
                     feat_vec.extend([0.0] * 17)
@@ -122,11 +149,11 @@ def main():
                 # 5 features from llm_misconceptions
                 if q.misconceptions is not None:
                     feat_vec.extend([
-                        float(q.misconceptions.llm_arithmetic),
-                        float(q.misconceptions.llm_procedural),
-                        float(q.misconceptions.llm_conceptual),
-                        float(q.misconceptions.llm_lack_of_sense),
-                        float(q.misconceptions.llm_misconception_score)
+                        safe_float(q.misconceptions.llm_arithmetic),
+                        safe_float(q.misconceptions.llm_procedural),
+                        safe_float(q.misconceptions.llm_conceptual),
+                        safe_float(q.misconceptions.llm_lack_of_sense),
+                        safe_float(q.misconceptions.llm_misconception_score)
                     ])
                 else:
                     feat_vec.extend([0.0] * 5)
@@ -165,7 +192,8 @@ def main():
     model.eval()
 
     # 4. Create dataset and dataloader
-    max_seq_len = model.hparams.max_seq_len
+    hparams = model.hparams
+    max_seq_len = int(hparams["max_seq_len"] if isinstance(hparams, dict) else getattr(hparams, "max_seq_len"))
     print(f"Sequence length model was trained with: {max_seq_len}")
     
     test_dataset = StudentSequenceDataset(

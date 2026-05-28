@@ -119,6 +119,10 @@ st.markdown(
 
 # Helper function to find best checkpoint automatically
 def find_checkpoint(model_type):
+    fixed_name = f"checkpoints/best-neural-cat-{model_type}.ckpt"
+    if os.path.exists(fixed_name):
+        return fixed_name
+        
     if model_type == "optimized":
         ckpts = glob.glob("checkpoints/best-neural-cat-optimized-*.ckpt")
     else:

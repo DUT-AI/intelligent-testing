@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from app.core.neural_cat import (
     NeuralCATDecoder,
@@ -14,28 +13,22 @@ from app.core.neural_cat import (
 class QuestionFeatureFusion(nn.Module):
     """
     Fuses question text embeddings (e.g. Qwen 1024-dim) with tabular linguistic
-    and misconception features (22-dim) using a Multi-Layer Perceptron (MLP)
-    with Layer Normalization.
+    and misconception features (22-dim) by projecting tabular features to d_embedding (1024-dim)
+    and adding them directly (Residual Fusion), followed by LayerNorm.
     """
     def __init__(self, d_embedding: int = 1024, d_features: int = 22, d_out: int = 1024):
         super().__init__()
-        # Tabular feature projector
+        # 1. Project tabular features từ d_features lên d_embedding
         self.feature_projector = nn.Sequential(
-            nn.Linear(d_features, 64),
-            nn.LayerNorm(64),
-            nn.ReLU(),
-            nn.Linear(64, 128),
+            nn.Linear(d_features, 128),
             nn.LayerNorm(128),
-            nn.ReLU()
-        )
-        # Fusion projection network
-        self.fusion_network = nn.Sequential(
-            nn.Linear(d_embedding + 128, 512),
-            nn.LayerNorm(512),
             nn.ReLU(),
-            nn.Linear(512, d_out),
-            nn.LayerNorm(d_out)
+            nn.Linear(128, d_embedding),
+            nn.LayerNorm(d_embedding)
         )
+        
+        # 2. Lớp chuẩn hóa sau khi cộng (Post-Fusion)
+        self.norm = nn.LayerNorm(d_out)
 
     def forward(self, x_emb: torch.Tensor, x_feat: torch.Tensor):
         """
@@ -45,9 +38,14 @@ class QuestionFeatureFusion(nn.Module):
         Returns:
             fused_x: Fused question embeddings, shape (B, T, d_out)
         """
-        feat_proj = self.feature_projector(x_feat)  # (B, T, 128)
-        fused = torch.cat([x_emb, feat_proj], dim=-1)  # (B, T, d_embedding + 128)
-        return self.fusion_network(fused)  # (B, T, d_out)
+        # Chiếu đặc trưng bảng
+        feat_proj = self.feature_projector(x_feat)  # (B, T, d_embedding)
+        
+        # Cộng residual
+        fused = x_emb + feat_proj  # (B, T, d_embedding)
+        
+        # Chuẩn hóa
+        return self.norm(fused)  # (B, T, d_out)
 
 
 class NeuralCATEngineOptimized(nn.Module):
@@ -115,6 +113,6 @@ class NeuralCATEngineOptimized(nn.Module):
         theta_pred = self.decoder(h, concept_indices, padding_mask=padding_mask)
         
         # 6. Block 5: Predict output logits
-        logits, delta = self.predictor(theta_pred, x, concept_indices, g, s)
+        logits, _ = self.predictor(theta_pred, x, concept_indices, g, s)
         
         return logits, g, s
