@@ -115,11 +115,12 @@ class LitNeuralCATOptimized(L.LightningModule):
         else:
             loss_raw = bce_loss_raw
 
-        # 2. Regularization Loss: penalize deviation from g_prior (guessing) and large values of slip (s)
+        # 2. Regularization Loss: penalize deviation from g_prior (guessing) and basic slip level (0.05)
+        s_prior = 0.05
         if g_priors is not None:
-            reg_loss_raw = (g - g_priors) ** 2 + s**2
+            reg_loss_raw = (g - g_priors) ** 2 + (s - s_prior) ** 2
         else:
-            reg_loss_raw = g**2 + s**2
+            reg_loss_raw = (g - 0.25) ** 2 + (s - s_prior) ** 2
 
         # 3. Uncertainty-aware loss (Heteroscedastic calibration)
         # log_var = 2 * log(se), se = exp(0.5 * log_var)

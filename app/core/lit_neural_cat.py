@@ -1,5 +1,4 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import lightning as L
 from app.core.neural_cat import NeuralCATEngine
@@ -77,11 +76,12 @@ class LitNeuralCAT(L.LightningModule):
             logits, r.float(), reduction="none"
         )
 
-        # 2. Regularization Loss: penalize deviation from g_prior (guessing) and large values of slip (s)
+        # 2. Regularization Loss: penalize deviation from g_prior (guessing) and basic slip level (0.05)
+        s_prior = 0.05
         if g_priors is not None:
-            reg_loss_raw = (g - g_priors) ** 2 + s**2
+            reg_loss_raw = (g - g_priors) ** 2 + (s - s_prior) ** 2
         else:
-            reg_loss_raw = g**2 + s**2
+            reg_loss_raw = g**2 + (s - s_prior) ** 2
 
         # 3. Mask out loss values at padding positions
         if padding_mask is not None:

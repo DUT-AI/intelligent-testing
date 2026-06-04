@@ -74,9 +74,9 @@ resume-optimized: ## Resume training optimized model with Focal Loss, label smoo
 	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py \
 		--model_type optimized \
 		--epochs 20 \
-		--batch_size 512 \
+		--batch_size 256 \
 		--max_seq_len 50 \
-		--ckpt_path "/home/aorus/workspaces/intelligent-testing/checkpoints/best-neural-cat-optimized-v14.ckpt" \
+		--ckpt_path "/home/aorus/workspaces/intelligent-testing/checkpoints/best-neural-cat-optimized-v14-reinit.ckpt" \
 		--patience 10 \
 		--precision bf16-mixed \
 		--lr 5e-4 \

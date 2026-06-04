@@ -72,7 +72,7 @@ class StudentSequenceDataset(Dataset):
             
             # Guess priors
             opt_cnt = question_option_counts.get(q_id, 0) if question_option_counts else 0
-            g_prior = 1.0 / opt_cnt if opt_cnt >= 2 else 0.01
+            g_prior = 1.0 / opt_cnt if opt_cnt >= 2 else 0.25
             self.question_g_priors[idx] = g_prior
             
             # Tabular features

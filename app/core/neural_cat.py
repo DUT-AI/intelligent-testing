@@ -62,6 +62,8 @@ class NeuralCATRefiner(nn.Module):
                 q_indices,
                 0,
             )
+            assert self.q_g_bias is not None
+            assert self.q_s_bias is not None
             g_raw = g_raw + self.q_g_bias(safe_q_indices).squeeze(-1)
             s_raw = s_raw + self.q_s_bias(safe_q_indices).squeeze(-1)
 
@@ -71,7 +73,8 @@ class NeuralCATRefiner(nn.Module):
         else:
             g = torch.sigmoid(g_raw) * 0.25
 
-        s = torch.sigmoid(s_raw)
+        # Giới hạn slip (s) tối đa là 15% (0.15) để phản ánh đúng thực tế trắc nghiệm
+        s = torch.sigmoid(s_raw) * 0.15
 
         # Apply 4PL soft label formula:
         # r' = r * (1 - g) + (1 - r) * s

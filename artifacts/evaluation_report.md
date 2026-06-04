@@ -1,6 +1,6 @@
 # Neural CAT Test Evaluation Report
 
-- **Evaluated Checkpoint**: `/home/aorus/workspaces/intelligent-testing/checkpoints/best-neural-cat-optimized-v14.ckpt`
+- **Evaluated Checkpoint**: `checkpoints/best-neural-cat-optimized-v14.ckpt`
 - **Total Test Sequences**: `89192`
 - **Total Interaction Steps Evaluated**: `1050110`
 
@@ -31,12 +31,12 @@ Lớp 1 (Làm đúng)       0.86      0.91      0.88    843339
 ## Confusion Matrix
 
 ```text
-[[ 79810 126961]
- [ 78793 764546]]
-  - TN (Đoán đúng học sinh làm sai): 79810
-  - FP (Đoán sai thành làm đúng):   126961
-  - FN (Đoán sai thành làm sai):    78793
-  - TP (Đoán đúng học sinh làm đúng): 764546
+[[ 79809 126962]
+ [ 78792 764547]]
+  - TN (Đoán đúng học sinh làm sai): 79809
+  - FP (Đoán sai thành làm đúng):   126962
+  - FN (Đoán sai thành làm sai):    78792
+  - TP (Đoán đúng học sinh làm đúng): 764547
 ```
 
 ## Model Parameters Analysis
