@@ -49,7 +49,7 @@ class SubmitAnswerUseCase:
         question_option_counts = {qid: q["option_count"] for qid, q in questions_bank.items()}
 
         # 2. Run model forward pass to estimate new student mastery
-        theta_prev, mastery_scores = self.cat_model.estimate_mastery(
+        theta_prev, mastery_scores, se_last = self.cat_model.estimate_mastery(
             question_ids=session.questions_asked[:t],
             responses=session.responses,
             response_times=session.response_times,
@@ -65,7 +65,6 @@ class SubmitAnswerUseCase:
         # 3. Calculate Fisher Information for the current question based on student's ability BEFORE this step
         # This aligns with the adaptive testing principle where SE updates are calculated step-by-step
         # We need the predictions for this question at step t-1 (which was stored or we calculate here)
-        prev_theta = session.current_theta_state
         # For simplicity, we calculate the Fisher Information for the question just answered
         # using the student's NEW mastery. In practice, both approaches are highly correlated,
         # but using the updated theta gives the most post-hoc accurate SE.
@@ -94,9 +93,12 @@ class SubmitAnswerUseCase:
             
         info_history.append(info_val)
 
-        # 4. Compute Cumulative Standard Error: SE_t = 1 / sqrt(sum(Info))
-        sum_info = sum(info_history)
-        current_se = 1.0 / np.sqrt(max(1e-4, sum_info))
+        # 4. Compute Cumulative Standard Error: SE_t
+        if session.model_type == "optimized" and se_last is not None:
+            current_se = se_last
+        else:
+            sum_info = sum(info_history)
+            current_se = 1.0 / np.sqrt(max(1e-4, sum_info))
         session.se_history.append(current_se)
 
         # 5. Check if Stopping Criteria is satisfied

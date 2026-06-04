@@ -70,6 +70,26 @@ train-base: ## Train the baseline Neural CAT model (Optional: EPOCHS=50 BATCH_SI
 train-optimized: ## Train the optimized Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=256 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10 LR=1e-3 NUM_LAYERS=4 NHEAD=4 NUM_WORKERS=8)
 	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py --model_type optimized --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE) --precision bf16-mixed --compile --lr $(LR) --num_layers $(NUM_LAYERS) --nhead $(NHEAD) --num_workers $(NUM_WORKERS)
 
+resume-optimized: ## Resume training optimized model with Focal Loss, label smoothing and dataset filtering
+	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py \
+		--model_type optimized \
+		--epochs 20 \
+		--batch_size 512 \
+		--max_seq_len 50 \
+		--ckpt_path "/home/aorus/workspaces/intelligent-testing/checkpoints/best-neural-cat-optimized-v14.ckpt" \
+		--patience 10 \
+		--precision bf16-mixed \
+		--lr 5e-4 \
+		--num_layers 4 \
+		--nhead 4 \
+		--num_workers 8 \
+		--lambda_reg 0.02 \
+		--loss_type focal \
+		--focal_alpha 0.25 \
+		--focal_gamma 2.0 \
+		--label_smoothing 0.05 \
+		--force_rebuild
+
 eval: ## Evaluate the best checkpoint (auto-selected lowest validation loss)
 	PYTHONPATH=. uv run python3 scripts/evaluate_neural_cat.py
 

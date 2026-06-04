@@ -182,9 +182,9 @@ def main():
     print(f"Loading model from checkpoint: {checkpoint_path} ...")
     if model_type == "optimized":
         
-        model = LitNeuralCATOptimized.load_from_checkpoint(checkpoint_path)
+        model = LitNeuralCATOptimized.load_from_checkpoint(checkpoint_path, strict=False)
     else:
-        model = LitNeuralCAT.load_from_checkpoint(checkpoint_path)
+        model = LitNeuralCAT.load_from_checkpoint(checkpoint_path, strict=False)
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Evaluating on: {device}")
@@ -233,7 +233,7 @@ def main():
                 g_priors = g_priors.to(device)
                 
                 # Forward pass for optimized model
-                logits, g, s = model(x, x_feat, r, T_time, concept_indices, padding_mask, g_priors)
+                logits, g, s, _ = model(x, x_feat, r, T_time, concept_indices, padding_mask, g_priors)
             else:
                 x, r, T_time, concept_indices, padding_mask, g_priors = batch
                 x = x.to(device)
@@ -270,6 +270,8 @@ def main():
 
     binary_preds = (all_preds >= 0.5).astype(np.float32)
 
+    from sklearn.metrics import classification_report, confusion_matrix
+
     acc = accuracy_score(all_targets, binary_preds)
     auc = roc_auc_score(all_targets, all_preds)
     precision = precision_score(all_targets, binary_preds, zero_division=0)
@@ -278,6 +280,9 @@ def main():
 
     avg_guessing = np.mean(all_g)
     avg_slip = np.mean(all_s)
+
+    clf_report = classification_report(all_targets, binary_preds, target_names=["Lớp 0 (Làm sai)", "Lớp 1 (Làm đúng)"], zero_division=0)
+    conf_matrix = confusion_matrix(all_targets, binary_preds)
 
     # Print results
     print("\n" + "="*50)
@@ -288,9 +293,19 @@ def main():
     print("-"*50)
     print(f"Accuracy:             {acc:.4f} ({acc*100:.2f}%)")
     print(f"AUC-ROC:              {auc:.4f}")
-    print(f"Precision:            {precision:.4f}")
-    print(f"Recall:               {recall:.4f}")
-    print(f"F1-Score:             {f1:.4f}")
+    print(f"Precision (Class 1):  {precision:.4f}")
+    print(f"Recall (Class 1):     {recall:.4f}")
+    print(f"F1-Score (Class 1):   {f1:.4f}")
+    print("-"*50)
+    print("Detailed Classification Report:")
+    print(clf_report)
+    print("-"*50)
+    print("Confusion Matrix:")
+    print(conf_matrix)
+    print(f"  - TN (Đoán đúng học sinh làm sai): {conf_matrix[0, 0]}")
+    print(f"  - FP (Đoán sai thành làm đúng):   {conf_matrix[0, 1]}")
+    print(f"  - FN (Đoán sai thành làm sai):    {conf_matrix[1, 0]}")
+    print(f"  - TP (Đoán đúng học sinh làm đúng): {conf_matrix[1, 1]}")
     print("-"*50)
     print(f"Average Guessing (g): {avg_guessing:.4f}")
     print(f"Average Slip (s):     {avg_slip:.4f}")
@@ -311,9 +326,22 @@ def main():
         f.write("| --- | --- | --- |\n")
         f.write(f"| **Accuracy** | `{acc:.4f}` | {acc*100:.2f}% |\n")
         f.write(f"| **AUC-ROC** | `{auc:.4f}` | - |\n")
-        f.write(f"| **Precision** | `{precision:.4f}` | {precision*100:.2f}% |\n")
-        f.write(f"| **Recall** | `{recall:.4f}` | {recall*100:.2f}% |\n")
-        f.write(f"| **F1-Score** | `{f1:.4f}` | {f1*100:.2f}% |\n\n")
+        f.write(f"| **Precision (Lớp 1)** | `{precision:.4f}` | {precision*100:.2f}% |\n")
+        f.write(f"| **Recall (Lớp 1)** | `{recall:.4f}` | {recall*100:.2f}% |\n")
+        f.write(f"| **F1-Score (Lớp 1)** | `{f1:.4f}` | {f1*100:.2f}% |\n\n")
+        f.write("## Detailed Classification Report\n\n")
+        f.write("```text\n")
+        f.write(clf_report)
+        f.write("\n```\n\n")
+        f.write("## Confusion Matrix\n\n")
+        f.write("```text\n")
+        f.write(str(conf_matrix))
+        f.write("\n")
+        f.write(f"  - TN (Đoán đúng học sinh làm sai): {conf_matrix[0, 0]}\n")
+        f.write(f"  - FP (Đoán sai thành làm đúng):   {conf_matrix[0, 1]}\n")
+        f.write(f"  - FN (Đoán sai thành làm sai):    {conf_matrix[1, 0]}\n")
+        f.write(f"  - TP (Đoán đúng học sinh làm đúng): {conf_matrix[1, 1]}\n")
+        f.write("```\n\n")
         f.write("## Model Parameters Analysis\n\n")
         f.write(f"- **Average Guessing parameter ($g$)**: `{avg_guessing:.4f}`\n")
         f.write(f"- **Average Slip parameter ($s$)**: `{avg_slip:.4f}`\n\n")

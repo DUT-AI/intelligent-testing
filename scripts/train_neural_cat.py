@@ -99,7 +99,8 @@ class StudentSequenceDataset(Dataset):
             r_strings = [r.strip() for r in session.responses.split(",") if r.strip()]
             
             seq_len = min(len(q_ids_seq), len(r_strings), max_seq_len)
-            if seq_len == 0:
+            # 1. Bỏ qua chuỗi tương tác quá ngắn (seq_len < 3)
+            if seq_len < 3:
                 continue
             
             q_ids_seq = q_ids_seq[:seq_len]
@@ -109,6 +110,22 @@ class StudentSequenceDataset(Dataset):
                 raw_times = [t.strip() for t in session.response_time.split(",") if t.strip()]
             else:
                 raw_times = []
+
+            # 2. Bỏ qua session bấm bừa liên tục (average response time < 3.0s)
+            if len(raw_times) > 0:
+                try:
+                    times_numeric = []
+                    for t in raw_times:
+                        try:
+                            val = float(t.strip())
+                            if val > 0:
+                                times_numeric.append(val)
+                        except ValueError:
+                            pass
+                    if len(times_numeric) > 0 and np.mean(times_numeric) < 3.0:
+                        continue
+                except Exception:
+                    pass
 
             # 4.1 Map question IDs to matrix indices
             q_indices = np.zeros(self.max_seq_len, dtype=np.int64)
@@ -269,8 +286,37 @@ def parse_args():
         default=10,
         help="Number of epochs to wait with no validation loss improvement before early stopping",
     )
+    parser.add_argument(
+        "--force_rebuild",
+        action="store_true",
+        help="Force rebuilding dataset cache from database",
+    )
+    parser.add_argument(
+        "--loss_type",
+        type=str,
+        default="bce",
+        choices=["bce", "focal"],
+        help="Loss function type for optimized model (bce or focal)",
+    )
+    parser.add_argument(
+        "--focal_alpha",
+        type=float,
+        default=0.25,
+        help="Alpha weight for focal loss (weight of class 1)",
+    )
+    parser.add_argument(
+        "--focal_gamma",
+        type=float,
+        default=2.0,
+        help="Gamma focusing parameter for focal loss",
+    )
+    parser.add_argument(
+        "--label_smoothing",
+        type=float,
+        default=0.05,
+        help="Label smoothing factor for optimized model loss",
+    )
     return parser.parse_args()
-
 
 class GPULitNeuralCAT(LitNeuralCAT):
     def __init__(self, question_embeddings, question_concepts, question_g_priors, *args, **kwargs):
@@ -285,8 +331,11 @@ class GPULitNeuralCAT(LitNeuralCAT):
         concept_indices = self.question_concepts_tbl[q_indices]
         g_priors = self.question_g_priors_tbl[q_indices]
         
-        logits, g, s = self(x, r, T_time, concept_indices, padding_mask, g_priors)
-        loss, bce, reg = self._compute_loss(logits, r, g, s, padding_mask, g_priors)
+        # 3. Lọc tương tác bấm bừa (< 2.0 giây) bằng loss_mask
+        loss_mask = padding_mask & (T_time >= 2.0)
+        
+        logits, g, s = self(x, r, T_time, concept_indices, padding_mask, g_priors, q_indices=q_indices)
+        loss, bce, reg = self._compute_loss(logits, r, g, s, loss_mask, g_priors)
         
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log("train_bce_loss", bce, on_step=False, on_epoch=True, logger=True)
@@ -299,15 +348,18 @@ class GPULitNeuralCAT(LitNeuralCAT):
         concept_indices = self.question_concepts_tbl[q_indices]
         g_priors = self.question_g_priors_tbl[q_indices]
         
-        logits, g, s = self(x, r, T_time, concept_indices, padding_mask, g_priors)
-        loss, bce, reg = self._compute_loss(logits, r, g, s, padding_mask, g_priors)
+        # 3. Lọc tương tác bấm bừa (< 2.0 giây) bằng loss_mask
+        loss_mask = padding_mask & (T_time >= 2.0)
+        
+        logits, g, s = self(x, r, T_time, concept_indices, padding_mask, g_priors, q_indices=q_indices)
+        loss, bce, reg = self._compute_loss(logits, r, g, s, loss_mask, g_priors)
         
         P = torch.sigmoid(logits)
         preds = (P >= 0.5).float()
         correct = (preds == r.float()).float()
         
-        if padding_mask is not None:
-            mask_float = padding_mask.float()
+        if loss_mask is not None:
+            mask_float = loss_mask.float()
             acc = (correct * mask_float).sum() / mask_float.sum().clamp(min=1.0)
         else:
             acc = correct.mean()
@@ -333,13 +385,28 @@ class GPULitNeuralCATOptimized(LitNeuralCATOptimized):
         concept_indices = self.question_concepts_tbl[q_indices]
         g_priors = self.question_g_priors_tbl[q_indices]
         
-        logits, g, s = self(x_emb, x_feat, r, T_time, concept_indices, padding_mask, g_priors)
-        loss, bce, reg = self._compute_loss(logits, r, g, s, padding_mask, g_priors)
+        # 3. Lọc tương tác bấm bừa (< 2.0 giây) bằng loss_mask
+        loss_mask = padding_mask & (T_time >= 2.0)
         
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        # Forward pass (now returns 4 elements)
+        logits, g, s, se = self(x_emb, x_feat, r, T_time, concept_indices, padding_mask, g_priors, q_indices=q_indices)
+        
+        # Compute loss (using loss_mask)
+        loss, bce, reg, unc = self._compute_loss(logits, r, g, s, se, loss_mask, g_priors)
+        
+        # Contrastive loss (still uses padding_mask to maintain SE progression consistency)
+        cl_loss = self._compute_contrastive_loss(se, r, padding_mask)
+        total_loss = loss + self.lambda_cl * cl_loss
+        
+        self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log("train_bce_loss", bce, on_step=False, on_epoch=True, logger=True)
         self.log("train_reg_loss", reg, on_step=False, on_epoch=True, logger=True)
-        return loss
+        self.log("train_unc_loss", unc, on_step=False, on_epoch=True, logger=True)
+        self.log("train_cl_loss", cl_loss, on_step=False, on_epoch=True, logger=True)
+        
+        se_valid = se[padding_mask] if padding_mask is not None else se
+        self.log("train_se_mean", se_valid.mean(), on_step=False, on_epoch=True, logger=True)
+        return total_loss
 
     def validation_step(self, batch, batch_idx):
         q_indices, r, T_time, padding_mask = batch
@@ -348,23 +415,38 @@ class GPULitNeuralCATOptimized(LitNeuralCATOptimized):
         concept_indices = self.question_concepts_tbl[q_indices]
         g_priors = self.question_g_priors_tbl[q_indices]
         
-        logits, g, s = self(x_emb, x_feat, r, T_time, concept_indices, padding_mask, g_priors)
-        loss, bce, reg = self._compute_loss(logits, r, g, s, padding_mask, g_priors)
+        # 3. Lọc tương tác bấm bừa (< 2.0 giây) bằng loss_mask
+        loss_mask = padding_mask & (T_time >= 2.0)
+        
+        # Forward pass
+        logits, g, s, se = self(x_emb, x_feat, r, T_time, concept_indices, padding_mask, g_priors, q_indices=q_indices)
+        
+        # Compute loss (using loss_mask)
+        loss, bce, reg, unc = self._compute_loss(logits, r, g, s, se, loss_mask, g_priors)
+        
+        # Contrastive loss
+        cl_loss = self._compute_contrastive_loss(se, r, padding_mask)
+        total_loss = loss + self.lambda_cl * cl_loss
         
         P = torch.sigmoid(logits)
         preds = (P >= 0.5).float()
         correct = (preds == r.float()).float()
         
-        if padding_mask is not None:
-            mask_float = padding_mask.float()
+        if loss_mask is not None:
+            mask_float = loss_mask.float()
             acc = (correct * mask_float).sum() / mask_float.sum().clamp(min=1.0)
         else:
             acc = correct.mean()
             
-        self.log("val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val_loss", total_loss, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_bce_loss", bce, on_epoch=True, logger=True)
         self.log("val_acc", acc, on_epoch=True, prog_bar=True, logger=True)
-        return {"val_loss": loss, "val_acc": acc}
+        self.log("val_unc_loss", unc, on_epoch=True, logger=True)
+        self.log("val_cl_loss", cl_loss, on_epoch=True, logger=True)
+        
+        se_valid = se[padding_mask] if padding_mask is not None else se
+        self.log("val_se_mean", se_valid.mean(), on_epoch=True, logger=True)
+        return {"val_loss": total_loss, "val_acc": acc}
 
 
 def main():
@@ -372,144 +454,175 @@ def main():
     if args.ckpt_path == "":
         args.ckpt_path = None
 
-    # 1. Fetch questions, embeddings, and concepts
-    print("--- Connecting to database and loading question metadata ---")
-    db_session = SessionLocal()
-    try:
-        # Load all questions
-        from sqlalchemy.orm import joinedload
+    cache_dir = "data/cache"
+    train_cache_path = os.path.join(cache_dir, f"train_dataset_{args.model_type}_seq{args.max_seq_len}.pt")
+    val_cache_path = os.path.join(cache_dir, f"val_dataset_{args.model_type}_seq{args.max_seq_len}.pt")
 
-        if args.model_type == "optimized":
-            db_questions = (
-                db_session.query(Question)
-                .options(
-                    joinedload(Question.features), joinedload(Question.misconceptions)
+    use_cache = (
+        not args.force_rebuild
+        and os.path.exists(train_cache_path)
+        and os.path.exists(val_cache_path)
+    )
+
+    if use_cache:
+        print(f"--- Loading cached datasets from {cache_dir} ---")
+        try:
+            train_dataset = torch.load(train_cache_path)
+            val_dataset = torch.load(val_cache_path)
+            K_val = train_dataset.K
+            print(f"Datasets loaded successfully from cache. K={K_val}")
+        except Exception as e:
+            print(f"Error loading cache: {e}. Falling back to database loading...")
+            use_cache = False
+
+    if not use_cache:
+        # 1. Fetch questions, embeddings, and concepts
+        print("--- Connecting to database and loading question metadata ---")
+        db_session = SessionLocal()
+        try:
+            # Load all questions
+            from sqlalchemy.orm import joinedload
+
+            if args.model_type == "optimized":
+                db_questions = (
+                    db_session.query(Question)
+                    .options(
+                        joinedload(Question.features), joinedload(Question.misconceptions)
+                    )
+                    .all()
                 )
+            else:
+                db_questions = db_session.query(Question).all()
+            print(f"Loaded {len(db_questions)} questions from database.")
+
+            # Determine K automatically from database concepts
+            max_concept_id = 0
+            for q in db_questions:
+                if q.concept_ids:
+                    for cid in q.concept_ids:
+                        if cid > max_concept_id:
+                            max_concept_id = cid
+            K_val = max_concept_id + 1
+            if K_val < 1:
+                K_val = 1175
+            print(f"Automatically determined K (number of concepts) = {K_val}")
+
+            question_embeddings = {}
+            question_concepts = {}
+            question_features = {} if args.model_type == "optimized" else None
+            question_option_counts = {}
+
+            for q in db_questions:
+                if q.embedding is not None:
+                    question_embeddings[q.id] = np.array(q.embedding, dtype=np.float32)
+                # Handle concept maps if available, else empty list
+                question_concepts[q.id] = q.concept_ids or []
+                question_option_counts[q.id] = q.option_count or 0
+
+                # Fetch tabular features if optimized model is used
+                if args.model_type == "optimized" and question_features is not None:
+                    feat_vec = []
+                    # 17 features from question_features
+                    if q.features is not None:
+                        feat_vec.extend(
+                            [
+                                float(q.features.word_count),
+                                float(q.features.avg_word_length),
+                                float(q.features.avg_sentence_length),
+                                float(q.features.vocab_difficulty),
+                                float(q.features.syntactic_complexity),
+                                float(q.features.p_concrete),
+                                float(q.features.p_symbol),
+                                float(q.features.p_abstract),
+                                float(q.features.inference_steps),
+                                float(q.features.q1_tinhtoan),
+                                float(q.features.q2_lythuyetso),
+                                float(q.features.q3_hinhhoc),
+                                float(q.features.q4_chuyendong),
+                                float(q.features.q5_toandokinhdien),
+                                float(q.features.q6_tonghieuti),
+                                float(q.features.q7_dem_tohop),
+                                float(q.features.q8_logic_trochoi),
+                            ]
+                        )
+                    else:
+                        feat_vec.extend([0.0] * 17)
+
+                    # 5 features from llm_misconceptions
+                    if q.misconceptions is not None:
+                        feat_vec.extend(
+                            [
+                                float(q.misconceptions.llm_arithmetic),
+                                float(q.misconceptions.llm_procedural),
+                                float(q.misconceptions.llm_conceptual),
+                                float(q.misconceptions.llm_lack_of_sense),
+                                float(q.misconceptions.llm_misconception_score),
+                            ]
+                        )
+                    else:
+                        feat_vec.extend([0.0] * 5)
+
+                    question_features[q.id] = np.array(feat_vec, dtype=np.float32)
+
+            # Fetch student sessions from database
+            print("Loading student sessions from student_sessions...")
+
+            train_sequences = (
+                db_session.query(StudentSession)
+                .filter(StudentSession.dataset_type == "train")
                 .all()
             )
-        else:
-            db_questions = db_session.query(Question).all()
-        print(f"Loaded {len(db_questions)} questions from database.")
+            val_sequences = (
+                db_session.query(StudentSession)
+                .filter(StudentSession.dataset_type == "val")
+                .all()
+            )
 
-        # Determine K automatically from database concepts
-        max_concept_id = 0
-        for q in db_questions:
-            if q.concept_ids:
-                for cid in q.concept_ids:
-                    if cid > max_concept_id:
-                        max_concept_id = cid
-        K_val = max_concept_id + 1
-        if K_val < 1:
-            K_val = 1175
-        print(f"Automatically determined K (number of concepts) = {K_val}")
+            print(
+                f"Loaded {len(train_sequences)} training sessions and {len(val_sequences)} validation sessions from student_sessions."
+            )
 
-        question_embeddings = {}
-        question_concepts = {}
-        question_features = {} if args.model_type == "optimized" else None
-        question_option_counts = {}
+        except Exception as e:
+            print(f"Database error: {e}")
+            return
+        finally:
+            db_session.close()
 
-        for q in db_questions:
-            if q.embedding is not None:
-                question_embeddings[q.id] = np.array(q.embedding, dtype=np.float32)
-            # Handle concept maps if available, else empty list
-            question_concepts[q.id] = q.concept_ids or []
-            question_option_counts[q.id] = q.option_count or 0
+        if not train_sequences:
+            print("No student sequences found for training. Please check your DB setup.")
+            return
 
-            # Fetch tabular features if optimized model is used
-            if args.model_type == "optimized" and question_features is not None:
-                feat_vec = []
-                # 17 features from question_features
-                if q.features is not None:
-                    feat_vec.extend(
-                        [
-                            float(q.features.word_count),
-                            float(q.features.avg_word_length),
-                            float(q.features.avg_sentence_length),
-                            float(q.features.vocab_difficulty),
-                            float(q.features.syntactic_complexity),
-                            float(q.features.p_concrete),
-                            float(q.features.p_symbol),
-                            float(q.features.p_abstract),
-                            float(q.features.inference_steps),
-                            float(q.features.q1_tinhtoan),
-                            float(q.features.q2_lythuyetso),
-                            float(q.features.q3_hinhhoc),
-                            float(q.features.q4_chuyendong),
-                            float(q.features.q5_toandokinhdien),
-                            float(q.features.q6_tonghieuti),
-                            float(q.features.q7_dem_tohop),
-                            float(q.features.q8_logic_trochoi),
-                        ]
-                    )
-                else:
-                    feat_vec.extend([0.0] * 17)
-
-                # 5 features from llm_misconceptions
-                if q.misconceptions is not None:
-                    feat_vec.extend(
-                        [
-                            float(q.misconceptions.llm_arithmetic),
-                            float(q.misconceptions.llm_procedural),
-                            float(q.misconceptions.llm_conceptual),
-                            float(q.misconceptions.llm_lack_of_sense),
-                            float(q.misconceptions.llm_misconception_score),
-                        ]
-                    )
-                else:
-                    feat_vec.extend([0.0] * 5)
-
-                question_features[q.id] = np.array(feat_vec, dtype=np.float32)
-
-        # Fetch student sessions from database
-        print("Loading student sessions from student_sessions...")
-
-        train_sequences = (
-            db_session.query(StudentSession)
-            .filter(StudentSession.dataset_type == "train")
-            .all()
+        # 2. Create datasets and dataloaders
+        print("Building datasets and dataloaders...")
+        train_dataset = StudentSequenceDataset(
+            sequences=train_sequences,
+            question_embeddings=question_embeddings,
+            question_concepts=question_concepts,
+            question_features=question_features,
+            question_option_counts=question_option_counts,
+            max_seq_len=args.max_seq_len,
+            K=K_val,
+            return_indices=True,
         )
-        val_sequences = (
-            db_session.query(StudentSession)
-            .filter(StudentSession.dataset_type == "val")
-            .all()
+        val_dataset = StudentSequenceDataset(
+            sequences=val_sequences,
+            question_embeddings=question_embeddings,
+            question_concepts=question_concepts,
+            question_features=question_features,
+            question_option_counts=question_option_counts,
+            max_seq_len=args.max_seq_len,
+            K=K_val,
+            return_indices=True,
         )
 
-        print(
-            f"Loaded {len(train_sequences)} training sessions and {len(val_sequences)} validation sessions from student_sessions."
-        )
-
-    except Exception as e:
-        print(f"Database error: {e}")
-        return
-    finally:
-        db_session.close()
-
-    if not train_sequences:
-        print("No student sequences found for training. Please check your DB setup.")
-        return
-
-    # 2. Create datasets and dataloaders
-    print("Building datasets and dataloaders...")
-    train_dataset = StudentSequenceDataset(
-        sequences=train_sequences,
-        question_embeddings=question_embeddings,
-        question_concepts=question_concepts,
-        question_features=question_features,
-        question_option_counts=question_option_counts,
-        max_seq_len=args.max_seq_len,
-        K=K_val,
-        return_indices=True,
-    )
-    val_dataset = StudentSequenceDataset(
-        sequences=val_sequences,
-        question_embeddings=question_embeddings,
-        question_concepts=question_concepts,
-        question_features=question_features,
-        question_option_counts=question_option_counts,
-        max_seq_len=args.max_seq_len,
-        K=K_val,
-        return_indices=True,
-    )
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            print(f"Caching datasets to {cache_dir}...")
+            torch.save(train_dataset, train_cache_path)
+            torch.save(val_dataset, val_cache_path)
+            print("Datasets cached successfully!")
+        except Exception as e:
+            print(f"Warning: Failed to cache datasets: {e}")
 
     train_loader = DataLoader(
         train_dataset,
@@ -531,8 +644,8 @@ def main():
         prefetch_factor=4 if args.num_workers > 0 else None,
     )
 
-    # 3. Instantiate model
     print(f"Initializing model (type: {args.model_type}) with K={K_val}...")
+    num_questions = len(train_dataset.q_id_to_idx)
     if args.model_type == "optimized":
         model = GPULitNeuralCATOptimized(
             question_embeddings=train_dataset.question_embeddings_matrix,
@@ -549,6 +662,11 @@ def main():
             max_seq_len=args.max_seq_len,
             lr=args.lr,
             lambda_reg=args.lambda_reg,
+            loss_type=args.loss_type,
+            focal_alpha=args.focal_alpha,
+            focal_gamma=args.focal_gamma,
+            label_smoothing=args.label_smoothing,
+            num_questions=num_questions,
         )
         ckpt_filename = "best-neural-cat-optimized"
     else:
@@ -565,12 +683,14 @@ def main():
             max_seq_len=args.max_seq_len,
             lr=args.lr,
             lambda_reg=args.lambda_reg,
+            num_questions=num_questions,
         )
         ckpt_filename = "best-neural-cat-base"
         
     if args.compile and hasattr(torch, "compile"):
         print("Compiling model for maximum GPU performance...")
-        model = torch.compile(model)  # type: ignore
+        import typing
+        model = typing.cast(L.LightningModule, torch.compile(model))
 
     # 4. Define Checkpoint Callbacks
     checkpoint_callback = ModelCheckpoint(

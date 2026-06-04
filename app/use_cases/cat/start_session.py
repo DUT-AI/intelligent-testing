@@ -67,7 +67,7 @@ class StartCATSessionUseCase:
         )
         
         # 4. Estimate initial student mastery (T=0)
-        theta_prev, mastery_scores = self.cat_model.estimate_mastery(
+        theta_prev, mastery_scores, _ = self.cat_model.estimate_mastery(
             question_ids=[],
             responses=[],
             response_times=[],

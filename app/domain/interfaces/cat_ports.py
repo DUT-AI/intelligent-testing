@@ -25,13 +25,14 @@ class CATModelPort(ABC):
         question_embeddings: Dict[str, np.ndarray],
         question_features: Optional[Dict[str, np.ndarray]] = None,
         question_option_counts: Optional[Dict[str, int]] = None
-    ) -> Tuple[Any, np.ndarray]:
+    ) -> Tuple[Any, np.ndarray, Optional[float]]:
         """
         Estimates the student's concept masteries (theta) and hidden states
         based on the sequence of interactions.
         Returns:
             theta_prev: The updated student ability state matrix, shape (1, K+1, d_h)
             mastery_scores: Vector of scalar masteries for all K concepts, shape (K,)
+            se_last: The estimated Standard Error after the latest step (if optimized, else None)
         """
         pass
 

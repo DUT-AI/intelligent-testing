@@ -62,13 +62,14 @@ class NeuralCATModelAdapter(CATModelPort):
         question_embeddings: Dict[str, np.ndarray],
         question_features: Optional[Dict[str, np.ndarray]] = None,
         question_option_counts: Optional[Dict[str, int]] = None
-    ) -> Tuple[torch.Tensor, np.ndarray]:
+    ) -> Tuple[torch.Tensor, np.ndarray, Optional[float]]:
         """
         Re-runs the interaction history through NeuralCAT sequential blocks to extract
         the exact student ability matrix theta_prev after the latest question.
         Returns:
             theta_prev: torch.Tensor of shape (1, K+1, d_h)
             mastery_scores: np.ndarray of shape (K,) containing scalar masteries mapped to [0, 1] via Sigmoid
+            se_last: Optional float representing the estimated Standard Error at the latest step
         """
         assert self.model is not None
         assert self.K is not None
@@ -78,7 +79,8 @@ class NeuralCATModelAdapter(CATModelPort):
                 theta_0 = self.model.model.decoder.theta_0.unsqueeze(0).to(self.device)  # (1, K+1, d_h)
                 mastery_all = self.model.model.predictor.proj_mastery(theta_0).squeeze(0).squeeze(-1)  # (K+1,)
                 mastery_scores = torch.sigmoid(mastery_all[:self.K]).cpu().numpy()  # (K,)
-                return theta_0, mastery_scores
+                se_init = 1.0 if self.model_type == "optimized" else None
+                return theta_0, mastery_scores, se_init
                 
         # 1. Build input tensors for the sequence (length T)
         T = len(question_ids)
@@ -187,7 +189,13 @@ class NeuralCATModelAdapter(CATModelPort):
             mastery_all = engine.predictor.proj_mastery(theta_prev).squeeze(0).squeeze(-1)  # (K+1,)
             mastery_scores = torch.sigmoid(mastery_all[:self.K]).cpu().numpy()  # (K,)
             
-            return theta_prev, mastery_scores
+            se_last = None
+            if self.model_type == "optimized":
+                # Compute SE for the latest step using uncertainty head
+                log_var_seq = decoder.uncertainty_head(h_projected)  # (1, T, 1)
+                se_last = torch.exp(0.5 * log_var_seq[:, -1, :]).item()  # scalar float
+                
+            return theta_prev, mastery_scores, se_last
 
     def predict_candidates(
         self,
