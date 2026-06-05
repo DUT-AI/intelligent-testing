@@ -1,0 +1,5 @@
+[core]
+    remote = origin
+['remote "origin"']
+    url = https://dagshub.com/DUT_AI_CLUB/intelligence-testing.dvc
+    auth = basic

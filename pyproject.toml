@@ -24,6 +24,8 @@ dependencies = [
     "streamlit>=1.57.0",
     "plotly>=6.7.0",
     "torchvision>=0.20.1",
+    "dvc>=3.67.1",
+    "dagshub>=0.7.0",
 ]
 
 [project.scripts]
