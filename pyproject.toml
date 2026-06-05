@@ -26,6 +26,7 @@ dependencies = [
     "torchvision>=0.20.1",
     "dvc>=3.67.1",
     "dagshub>=0.7.0",
+    "dvc-s3>=3.3.0",
 ]
 
 [project.scripts]
