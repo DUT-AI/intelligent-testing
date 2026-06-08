@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     )
     db_host: str = Field("localhost", validation_alias="POSTGRES_HOST")
     postgres_port: int = Field(5432, validation_alias="POSTGRES_PORT")
-    postgres_db: str = Field("intelligent_testing_db", validation_alias="POSTGRES_DB")
+    postgres_db: str = Field("cpp_database", validation_alias="POSTGRES_DB")
 
     @property
     def database_url(self) -> str:

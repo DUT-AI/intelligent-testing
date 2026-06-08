@@ -1,193 +1,128 @@
-# Byte-compiled / optimized / DLL files
+# ==============================================================================
+# Python
+# ==============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
-bin/
-build/
-develop-eggs/
-dist/
-eggs/
-lib/
-downloads/
-lib64/
-.eggs/
-parts/
-sdist/
-var/
-wheels/
+*.egg
 *.egg-info/
 .installed.cfg
-*.egg
+
+# Packaging / build
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+sdist/
+wheels/
+var/
+parts/
+bin/
+lib/
+lib64/
 
 # PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so may be deleted later.
 *.manifest
 *.spec
-.nox/
 
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Unit test / coverage reports
-htmlcov/
-# Jupyter Notebook checkpoints
+# ==============================================================================
+# Testing / type checking / coverage
+# ==============================================================================
+.pytest_cache/
 .nox/
+.cache/
+.hypothesis/
+htmlcov/
 .coverage
 .coverage.*
-.cache
-nosetests.xml
 coverage.xml
+nosetests.xml
 *.cover
-.hypothesis/
-.idea/
-.pytest_cache/
+.mypy_cache/
+.dmypy.json
+cython_debug/
 
-# Translations
-*.mo
-*.pot
-
-# Django stuff:
-*.log
-local_settings.py
-
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-target/
-
-# Jupyter Notebook
-# Jupyter Notebook checkpoints
-.ipynb_checkpoints
-
-# pyenv
-.python-version
-
-# celery beat schedule file
-celerybeat-schedule
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
+# ==============================================================================
+# Environments & secrets  (NEVER commit: .env holds DB credentials)
+# ==============================================================================
 .env
-.venv
-env/
+.env.*
+.venv/
 venv/
+env/
 ENV/
 env.bak/
 venv.bak/
+.python-version
 
-# Spyder project settings
+# ==============================================================================
+# IDE / editor / OS
+# ==============================================================================
+.vscode/
+.idea/
 .spyderproject
 .spyproject
-
-# Rope project settings
 .ropeproject
-
-# Data files (raw datasets, large files)
-data/raw/**
-data/**
-*.csv
-
-# Jupyter notebooks and test files
-*.ipynb
-notebooks/**
-tests/**
-test_*.py
-
-# IDE and OS
-.DS_Store
 *.swp
 *.swo
 *~
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-
-# Cython debug symbols
-cython_debug/
-
-# OS X
 .DS_Store
-
-# IDEs
-.vscode/
-.idea/
-
-.venv
-# mypy
-.mypy_cache/
-.dmypy.json
-
-# VS Code
-.vscode/
-
-# MacOS
-.DS_Store
-
-# Windows
 Thumbs.db
 Desktop.ini
 
-# Data files
+# ==============================================================================
+# Jupyter
+#   Notebook SOURCE (*.ipynb) IS tracked on purpose so it is not lost on a
+#   re-clone. Only checkpoints and large generated outputs are ignored.
+# ==============================================================================
+.ipynb_checkpoints/
+
+# ==============================================================================
+# Data — raw, large, or generated (regenerated from dataset/*.csv via notebooks)
+# ==============================================================================
+data/
 *.csv
 *.tsv
 *.parquet
 *.h5
 *.db
 *.sqlite3
-*.log
-*.bak
 
-# Model files
+# Generated dataset artifacts produced by notebooks/prepare_dataset/prepare.ipynb
+notebooks/prepare_dataset/*.json
+notebooks/**/AI_Training_Sequences*.json
+
+# ==============================================================================
+# Models / checkpoints / training artifacts
+# ==============================================================================
 *.pt
 *.pth
-*.h5
 *.ckpt
 *.joblib
 *.pkl
 *.sav
-
-# Environment files
-.env
-.venv/
-venv/
-env/
-ENV/
-
-# Other
-*.swp
-*.swo
-*~
-
-# Ignore checkpoints and outputs
+checkpoints/
 **/checkpoints/
+artifacts/
+lightning_logs/
 **/outputs/
 **/logs/
-
-# Ignore large data and model folders
 **/llm_checkpoints/
-**/images/
 **/embeddings/
+**/images/
+data/Official/
 
-
-data/Official
-/checkpoints
+# ==============================================================================
+# Logs / misc
+# ==============================================================================
+*.log
+*.bak
+local_settings.py
+/site
