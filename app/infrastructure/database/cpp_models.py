@@ -14,7 +14,7 @@ independent from the legacy research-dataset models in `models.py`
 
 from typing import Any, List, Optional
 
-from sqlalchemy import Float, Integer, String, Text
+from sqlalchemy import Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -55,6 +55,61 @@ class Question(CppBase):
     correct_option_ids: Mapped[Optional[List[int]]] = mapped_column(
         ARRAY(Integer), nullable=True
     )
+
+
+class Feature(CppBase):
+    """Đặc trưng trích xuất cho mỗi câu hỏi (surface + LLM + code embedding).
+
+    Nguồn: notebooks/extract_feature/features.json (scalar + vector) và
+    code_embeddings.npy (E_code 768-d). Lưu GIÁ TRỊ THÔ — việc scale/normalize
+    để cho bước huấn luyện (fit trên tập train). Câu chưa có kết quả LLM -> H_* = NULL.
+    """
+
+    __tablename__ = "features"
+
+    question_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("questions.question_id"), primary_key=True
+    )
+
+    # --- Surface: lexical (1A) ---
+    L_qtok: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    L_lines: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    L_kw: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    L_ids: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # --- Surface: syntactic (1B) ---
+    S_nest: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    S_cf: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # [d_ptr, d_ref, d_arrow, d_scope, d_incr, d_assign]
+    S_ops: Mapped[Optional[List[float]]] = mapped_column(ARRAY(Float), nullable=True)
+
+    # --- Surface: structural (1C) ---
+    T_class: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # [N_class, D_inherit, R_count]
+    T_oop: Mapped[Optional[List[int]]] = mapped_column(ARRAY(Integer), nullable=True)
+    # [is_stack, is_heap, is_static, is_global]
+    T_mem: Mapped[Optional[List[int]]] = mapped_column(ARRAY(Integer), nullable=True)
+    T_type: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # --- Option features (1D) ---
+    O_var: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # [compile_error, runtime_error, another_answer]
+    O_spc: Mapped[Optional[List[int]]] = mapped_column(ARRAY(Integer), nullable=True)
+    O_sim: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # --- LLM features (2A/2B/2D/2E) — NULL nếu câu chưa chạy LLM ---
+    H_N: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    H_D: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    H_W: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    H_amb: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    H_B: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    H_M: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    H_P: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    H_Dmax: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    H_Dmean: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # --- Phase 1: code embedding (CodeBERT, 768-d) ---
+    E_code: Mapped[Optional[List[float]]] = mapped_column(ARRAY(Float), nullable=True)
 
 
 class Session(CppBase):

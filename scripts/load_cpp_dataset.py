@@ -13,7 +13,7 @@ import sys
 # Allow running as a standalone script from the project root.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.infrastructure.database.cpp_models import CppBase, Question, Session, Skill
+from app.infrastructure.database.cpp_models import CppBase, Feature, Question, Session, Skill
 
 try:
     # Preferred path: reuse the project's configured engine (-> cpp_database).
@@ -153,7 +153,7 @@ def main():
     session = SessionLocal()
     try:
         # Re-runnable: clear existing rows first so loading is idempotent.
-        for model in (Session, Question, Skill):
+        for model in (Feature, Session, Question, Skill):
             session.query(model).delete()
         session.commit()
 
