@@ -2,7 +2,7 @@
 # DEVELOPMENT TOOLING AND ENVIRONMENT MANAGEMENT
 # ==============================================================================
 
-.PHONY: help up down run migrate migration lint format check-types train-base train-optimized eval eval-ckpt compare test plot clean ui
+.PHONY: help up down run migrate migration lint format check-types train-base train-optimized train-cpp eval eval-ckpt compare test plot clean ui
 
 # Default variables for model training/evaluation
 EPOCHS ?= 50
@@ -14,7 +14,9 @@ PATIENCE ?= 10
 LR ?= 1e-3
 NUM_LAYERS ?= 4
 NHEAD ?= 4
-NUM_WORKERS ?= 8
+NUM_WORKERS ?= 0
+SEED ?= 42
+EMBEDDINGS_DIR ?= notebooks/extract_feature
 
 help: ## Show this help message
 	@echo "Available commands:"
@@ -69,6 +71,9 @@ train-base: ## Train the baseline Neural CAT model (Optional: EPOCHS=50 BATCH_SI
 
 train-optimized: ## Train the optimized Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=256 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10 LR=1e-3 NUM_LAYERS=4 NHEAD=4 NUM_WORKERS=8)
 	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py --model_type optimized --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE) --precision bf16-mixed --compile --lr $(LR) --num_layers $(NUM_LAYERS) --nhead $(NHEAD) --num_workers $(NUM_WORKERS)
+
+train-cpp: ## Train Neural CAT from the processed C++ database and CodeBERT npy embeddings (Optional: EPOCHS=20 BATCH_SIZE=64 MAX_SEQ_LEN=80 LR=1e-3 NUM_LAYERS=2 NHEAD=4 NUM_WORKERS=0 SEED=42 EMBEDDINGS_DIR=notebooks/extract_feature)
+	PYTHONPATH=. uv run python scripts/train_cpp_lightning.py --embeddings_dir $(EMBEDDINGS_DIR) --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --lr $(LR) --num_layers $(NUM_LAYERS) --nhead $(NHEAD) --num_workers $(NUM_WORKERS) --patience $(PATIENCE) --seed $(SEED)
 
 resume-optimized: ## Resume training optimized model with Focal Loss, label smoothing and dataset filtering
 	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py \
