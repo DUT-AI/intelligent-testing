@@ -1,0 +1,29 @@
+﻿question_id,question_content,all_option_ids,all_options_content,correct_option_ids,skill_ids
+7785,02,"[26267, 26268, 26269, 26270]","['A2', 'B2', 'C2', 'D2']",[26267],[8]
+13295,"Kết quả thực hiện đoạn chương trình sau là gì? #include #include using namespace std;
+int main() {
+	double Op1 = 10, Op2 = 5, Res;
+	char Op;
+	try {
+		if (Op != '+' && Op != '-' && Op != '*' && Op != '/')
+			throw Op;
+		switch(Op) {
+			case '+':
+				Res = Op1 + Op2;
+				break;
+			case '-':
+				Res = Op1 - Op2;
+				break;
+			case '*':
+				Res = Op1 * Op2;
+				break;
+			case '/':
+				Res = Op1 / Op2;
+				break;
+		}
+		cout << ""\n"" << Op1 << "" "" << Op << "" ""<< Op2 << "" = "" << Res;
+	} catch (const char n) {
+		cout << n << "" is not a valid operator"";
+	}
+	return 0;
+}","[36598, 36599, 36600, 36601, 36602, 36603, 36604, 36605]","['5', '15', '2', 'is not a valid operator', 'Another Answer', 'Runtime Error', 'Compile Error', '50']",[36601],[8]

@@ -88,7 +88,6 @@ Desktop.ini
 # Data — raw, large, or generated (regenerated from dataset/*.csv via notebooks)
 # ==============================================================================
 data/
-*.csv
 *.tsv
 *.parquet
 *.h5
@@ -96,8 +95,6 @@ data/
 *.sqlite3
 
 # Generated dataset artifacts produced by notebooks/prepare_dataset/prepare.ipynb
-notebooks/prepare_dataset/*.json
-notebooks/**/AI_Training_Sequences*.json
 
 # ==============================================================================
 # Models / checkpoints / training artifacts

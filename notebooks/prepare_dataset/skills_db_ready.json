@@ -1,0 +1,38 @@
+[
+    {
+        "skill_id":1,
+        "skill_name":"Chương 1: Extern C++"
+    },
+    {
+        "skill_id":2,
+        "skill_name":"Chương 2: OOP"
+    },
+    {
+        "skill_id":3,
+        "skill_name":"Chương 3: Operator Overloading"
+    },
+    {
+        "skill_id":4,
+        "skill_name":"Chương 4: Inheritance & Polymorphism"
+    },
+    {
+        "skill_id":5,
+        "skill_name":"Chương 5: Polymorphism"
+    },
+    {
+        "skill_id":6,
+        "skill_name":"Chương 5: Template"
+    },
+    {
+        "skill_id":7,
+        "skill_name":"Chương 6: Exception"
+    },
+    {
+        "skill_id":8,
+        "skill_name":"null"
+    },
+    {
+        "skill_id":15,
+        "skill_name":"Chương 8: Pointer"
+    }
+]
