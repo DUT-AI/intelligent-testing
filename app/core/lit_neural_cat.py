@@ -1,13 +1,12 @@
-import torch
-import torch.nn.functional as F
-import lightning as L
-from app.core.neural_cat import NeuralCATEngine
+from app.training.lit_model import LitCATModule
+from app.models.neural_cat_base import NeuralCATEngine
+
+__all__ = ["LitNeuralCAT"]
 
 
-class LitNeuralCAT(L.LightningModule):
+class LitNeuralCAT(LitCATModule):
     """
-    LightningModule wrapper for the Neural CAT Engine.
-    Handles training/validation step loops, loss masking, logging, and optimizers.
+    Backward-compatible PyTorch Lightning wrapper for the Neural CAT base engine.
     """
 
     def __init__(
@@ -25,11 +24,7 @@ class LitNeuralCAT(L.LightningModule):
         lambda_reg: float = 0.1,
         num_questions: int | None = None,
     ):
-        super().__init__()
-        self.save_hyperparameters()
-
-        # Instantiate the core model
-        self.model = NeuralCATEngine(
+        model = NeuralCATEngine(
             d_x=d_x,
             d_time=d_time,
             d_h=d_h,
@@ -41,141 +36,10 @@ class LitNeuralCAT(L.LightningModule):
             alpha_max=alpha_max,
             num_questions=num_questions,
         )
-
-        self.lr = lr
-        self.lambda_reg = lambda_reg
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        r: torch.Tensor,
-        T_time: torch.Tensor,
-        concept_indices: torch.Tensor,
-        padding_mask: torch.Tensor | None = None,
-        g_priors: torch.Tensor | None = None,
-        q_indices: torch.Tensor | None = None,
-    ):
-        return self.model(
-            x, r, T_time, concept_indices, padding_mask, g_priors, q_indices=q_indices
+        super().__init__(
+            model=model,
+            lr=lr,
+            lambda_reg=lambda_reg,
+            scheduler_type="onecycle",  # Base model uses OneCycleLR in legacy code
         )
-
-    def _compute_loss(
-        self,
-        logits: torch.Tensor,
-        r: torch.Tensor,
-        g: torch.Tensor,
-        s: torch.Tensor,
-        padding_mask: torch.Tensor | None = None,
-        g_priors: torch.Tensor | None = None,
-    ):
-        """
-        Computes masked Binary Cross Entropy and L2 regularization loss for guessing and slip parameters.
-        """
-        # 1. Binary Cross Entropy Loss using logits (autocast-safe)
-        bce_loss_raw = F.binary_cross_entropy_with_logits(
-            logits, r.float(), reduction="none"
-        )
-
-        # 2. Regularization Loss: penalize deviation from g_prior (guessing) and basic slip level (0.05)
-        s_prior = 0.05
-        if g_priors is not None:
-            reg_loss_raw = (g - g_priors) ** 2 + (s - s_prior) ** 2
-        else:
-            reg_loss_raw = g**2 + (s - s_prior) ** 2
-
-        # 3. Mask out loss values at padding positions
-        if padding_mask is not None:
-            mask_float = padding_mask.float()
-            mask_sum = mask_float.sum().clamp(min=1.0)
-
-            bce_loss = (bce_loss_raw * mask_float).sum() / mask_sum
-            reg_loss = (reg_loss_raw * mask_float).sum() / mask_sum
-        else:
-            bce_loss = bce_loss_raw.mean()
-            reg_loss = reg_loss_raw.mean()
-
-        total_loss = bce_loss + self.lambda_reg * reg_loss
-        return total_loss, bce_loss, reg_loss
-
-    def training_step(self, batch, batch_idx):
-        """
-        Expects batch to be a dictionary or tuple:
-        (x, r, T_time, concept_indices, padding_mask, g_priors)
-        """
-        x, r, T_time, concept_indices, *rest = batch
-        padding_mask = rest[0] if len(rest) > 0 else None
-        g_priors = rest[1] if len(rest) > 1 else None
-
-        # Forward pass
-        logits, g, s = self(x, r, T_time, concept_indices, padding_mask, g_priors)
-
-        # Compute loss
-        loss, bce, reg = self._compute_loss(logits, r, g, s, padding_mask, g_priors)
-
-        # Log training metrics
-        self.log(
-            "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
-        )
-        self.log("train_bce_loss", bce, on_step=False, on_epoch=True, logger=True)
-        self.log("train_reg_loss", reg, on_step=False, on_epoch=True, logger=True)
-
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        x, r, T_time, concept_indices, *rest = batch
-        padding_mask = rest[0] if len(rest) > 0 else None
-        g_priors = rest[1] if len(rest) > 1 else None
-
-        # Forward pass
-        logits, g, s = self(x, r, T_time, concept_indices, padding_mask, g_priors)
-
-        # Compute loss
-        loss, bce, reg = self._compute_loss(logits, r, g, s, padding_mask, g_priors)
-
-        # Compute accuracy (masked if padding_mask is present)
-        P = torch.sigmoid(logits)
-        preds = (P >= 0.5).float()
-        correct = (preds == r.float()).float()
-
-        if padding_mask is not None:
-            mask_float = padding_mask.float()
-            acc = (correct * mask_float).sum() / mask_float.sum().clamp(min=1.0)
-        else:
-            acc = correct.mean()
-
-        # Log validation metrics
-        self.log("val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_bce_loss", bce, on_epoch=True, logger=True)
-        self.log("val_acc", acc, on_epoch=True, prog_bar=True, logger=True)
-
-        return {"val_loss": loss, "val_acc": acc}
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=1e-4)
-
-        try:
-            if self.trainer is not None:
-                # estimated_stepping_steps tự động tính toán tổng số batch steps trên toàn bộ epoch
-                total_steps = int(getattr(self.trainer, "estimated_stepping_steps", 0))
-                if total_steps > 0:
-                    scheduler = torch.optim.lr_scheduler.OneCycleLR(
-                        optimizer,
-                        max_lr=self.lr,
-                        total_steps=total_steps,
-                        pct_start=0.1,  # 10% số bước đầu tiên dành cho Warmup
-                        anneal_strategy="cos",  # Cosine Annealing ở các bước sau
-                        div_factor=25.0,  # Bắt đầu từ lr = max_lr / 25
-                        final_div_factor=1000.0,  # Kết thúc ở lr = max_lr / 1000
-                    )
-                    return {
-                        "optimizer": optimizer,
-                        "lr_scheduler": {
-                            "scheduler": scheduler,
-                            "interval": "step",  # Cập nhật sau mỗi batch cập nhật (step)
-                            "frequency": 1,
-                        },
-                    }
-        except Exception:
-            pass
-
-        return optimizer
+        self.save_hyperparameters()

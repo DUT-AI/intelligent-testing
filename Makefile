@@ -2,34 +2,27 @@
 # DEVELOPMENT TOOLING AND ENVIRONMENT MANAGEMENT
 # ==============================================================================
 
-.PHONY: help up down run migrate migration lint format check-types train-base train-optimized train-cpp eval eval-ckpt compare test plot clean ui
+.PHONY: help up down run migrate migration lint format check-types train-base train-optimized train-cpp eval eval-ckpt compare test plot clean ui tensorboard
 
 # Default variables for model training/evaluation
-EPOCHS ?= 50
-BATCH_SIZE ?= 512
-MAX_SEQ_LEN ?= 50
-CHECKPOINT ?= ""
+EPOCHS ?= 1000
+BATCH_SIZE ?= 256
+MAX_SEQ_LEN ?= 80
+CHECKPOINT ?= "/home/aorus/workspaces/intelligent-testing/checkpoints/cpp-neural-cat-epoch=27-val_loss=0.6073.ckpt"
 RESUME ?= 
-PATIENCE ?= 10
+PATIENCE ?= 50
 LR ?= 1e-3
-NUM_LAYERS ?= 4
-NHEAD ?= 4
-NUM_WORKERS ?= 0
+NUM_LAYERS ?= 16
+NHEAD ?= 16
+D_H ?= 256
+MODEL_TYPE ?= optimized
+NUM_WORKERS ?= 4
 SEED ?= 42
 EMBEDDINGS_DIR ?= notebooks/extract_feature
 
 help: ## Show this help message
 	@echo "Available commands:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
-
-# --- Docker Environment ---
-up: ## Start the PostgreSQL database container
-	@echo "Starting PostgreSQL container..."
-	docker compose up -d
-
-down: ## Stop the PostgreSQL database container
-	@echo "Stopping PostgreSQL container..."
-	docker compose down
 
 # --- Database Migrations ---
 migrate: ## Apply database migrations using Alembic
@@ -66,15 +59,22 @@ run: ## Run the local FastAPI development server
 	@echo "Starting FastAPI server..."
 	uv run uvicorn app.main:app --reload
 
-train-base: ## Train the baseline Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=256 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10 LR=1e-3 NUM_LAYERS=4 NHEAD=4 NUM_WORKERS=8)
-	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py --model_type base --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE) --precision bf16-mixed --compile --lr $(LR) --num_layers $(NUM_LAYERS) --nhead $(NHEAD) --num_workers $(NUM_WORKERS)
+train-base: ## Train the baseline Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=256 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10 LR=1e-3 NUM_LAYERS=4 NHEAD=4 D_H=128 NUM_WORKERS=8)
+	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py --model_type base --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE) --precision bf16-mixed --compile --lr $(LR) --num_layers $(NUM_LAYERS) --nhead $(NHEAD) --d_h $(D_H) --num_workers $(NUM_WORKERS)
 
-train-optimized: ## Train the optimized Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=256 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10 LR=1e-3 NUM_LAYERS=4 NHEAD=4 NUM_WORKERS=8)
-	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py --model_type optimized --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE) --precision bf16-mixed --compile --lr $(LR) --num_layers $(NUM_LAYERS) --nhead $(NHEAD) --num_workers $(NUM_WORKERS)
+train-optimized: ## Train the optimized Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=256 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10 LR=1e-3 NUM_LAYERS=4 NHEAD=4 D_H=128 NUM_WORKERS=8)
+	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py --model_type optimized --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE) --precision bf16-mixed --compile --lr $(LR) --num_layers $(NUM_LAYERS) --nhead $(NHEAD) --d_h $(D_H) --num_workers $(NUM_WORKERS)
 
-train-cpp: ## Train Neural CAT from the processed C++ database and CodeBERT npy embeddings (Optional: EPOCHS=20 BATCH_SIZE=64 MAX_SEQ_LEN=80 LR=1e-3 NUM_LAYERS=2 NHEAD=4 NUM_WORKERS=0 SEED=42 EMBEDDINGS_DIR=notebooks/extract_feature)
-	PYTHONPATH=. uv run python scripts/train_cpp_lightning.py --embeddings_dir $(EMBEDDINGS_DIR) --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --lr $(LR) --num_layers $(NUM_LAYERS) --nhead $(NHEAD) --num_workers $(NUM_WORKERS) --patience $(PATIENCE) --seed $(SEED)
+train-film: ## Train the FiLM-modulated Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=256 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10 LR=1e-3 NUM_LAYERS=4 NHEAD=4 D_H=128 NUM_WORKERS=8)
+	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py --model_type film --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE) --precision bf16-mixed --compile --lr $(LR) --num_layers $(NUM_LAYERS) --nhead $(NHEAD) --d_h $(D_H) --num_workers $(NUM_WORKERS)
 
+train-attn: ## Train the Cross-Attention modulated Neural CAT model (Optional: EPOCHS=50 BATCH_SIZE=256 MAX_SEQ_LEN=150 RESUME=<ckpt_path> PATIENCE=10 LR=1e-3 NUM_LAYERS=4 NHEAD=4 D_H=128 NUM_WORKERS=8)
+	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py --model_type attn --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --ckpt_path "$(RESUME)" --patience $(PATIENCE) --precision bf16-mixed --compile --lr $(LR) --num_layers $(NUM_LAYERS) --nhead $(NHEAD) --d_h $(D_H) --num_workers $(NUM_WORKERS)
+
+train-cpp: ## Train Neural CAT from the processed C++ database and CodeBERT npy embeddings (Optional: EPOCHS=20 BATCH_SIZE=64 MAX_SEQ_LEN=80 LR=1e-3 NUM_LAYERS=2 NHEAD=4 D_H=128 NUM_WORKERS=0 SEED=42 EMBEDDINGS_DIR=notebooks/extract_feature MODEL_TYPE=optimized)
+	PYTHONPATH=. uv run python scripts/train_cpp_lightning.py --model_type $(MODEL_TYPE) --embeddings_dir $(EMBEDDINGS_DIR) --epochs $(EPOCHS) --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --lr $(LR) --num_layers $(NUM_LAYERS) --nhead $(NHEAD) --d_h $(D_H) --num_workers $(NUM_WORKERS) --patience $(PATIENCE) --seed $(SEED)
+resume-cpp: ## Resume training from a specific checkpoint (Usage: make resume-cpp CHECKPOINT=<path_to_ckpt>)
+	PYTHONPATH=. uv run python scripts/train_cpp_lightning.py --model_type $(MODEL_TYPE) --embeddings_dir $(EMBEDDINGS_DIR) --epochs 20 --batch_size $(BATCH_SIZE) --max_seq_len $(MAX_SEQ_LEN) --lr 5e-4 --num_layers $(NUM_LAYERS) --nhead $(NHEAD) --d_h $(D_H) --num_workers $(NUM_WORKERS) --patience $(PATIENCE) --seed $(SEED) --ckpt_path "/home/aorus/workspaces/intelligent-testing/checkpoints/cpp-neural-cat-epoch=27-val_loss=0.6073.ckpt"
 resume-optimized: ## Resume training optimized model with Focal Loss, label smoothing and dataset filtering
 	PYTHONPATH=. uv run python3 scripts/train_neural_cat.py \
 		--model_type optimized \
@@ -109,9 +109,15 @@ compare: ## Compare all evaluated models and update reports
 	PYTHONPATH=. uv run python3 scripts/compare_models.py
 
 
+test: ## Run unit tests with pytest
+	PYTHONPATH=. uv run pytest tests/ -v
+
 plot: ## Plot training/validation loss curves from the latest log
 	PYTHONPATH=. uv run python3 scripts/plot_loss.py
 
+
+tensorboard: ## Launch TensorBoard for visualization
+	uv run tensorboard --logdir lightning_logs/
 
 ui:
 	PYTHONPATH=. uv run streamlit run app/infrastructure/streamlit/streamlit.py
