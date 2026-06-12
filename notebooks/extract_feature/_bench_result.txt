@@ -1,0 +1,17 @@
+
+=== Server: https://llm.phuocnguyn.id.vn/v1 ===
+  concurrency= 1 | 2 req in  13.3s |  115.2 tok/s |  0.15 req/s | avg latency   6.7s
+  concurrency= 2 | 4 req in  29.6s |  103.9 tok/s |  0.14 req/s | avg latency  14.8s
+  concurrency= 4 | 8 req in  22.7s |  270.2 tok/s |  0.35 req/s | avg latency  11.4s
+  concurrency= 8 | 16 req in  44.5s |  276.1 tok/s |  0.36 req/s | avg latency  18.1s
+
+=== Server: https://llm2.dutai.site/v1 ===
+  concurrency= 1 | 2 req in  18.1s |   84.8 tok/s |  0.11 req/s | avg latency   9.1s
+  concurrency= 2 | 4 req in  20.4s |  150.7 tok/s |  0.20 req/s | avg latency  10.2s
+  concurrency= 4 | 8 req in  40.3s |  152.5 tok/s |  0.20 req/s | avg latency  17.6s
+  concurrency= 8 | 16 req in  91.2s |  134.8 tok/s |  0.18 req/s | avg latency  33.5s
+
+=== KET HOP 2 server (round-robin, tong 8 luong) ===
+  16 req in  40.2s |  305.7 tok/s |  0.40 req/s
+
+DONE

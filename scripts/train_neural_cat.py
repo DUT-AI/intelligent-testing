@@ -5,210 +5,13 @@ import lightning as L
 import numpy as np
 import torch
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-from torch.utils.data import DataLoader, Dataset
+from lightning.pytorch.loggers import TensorBoardLogger
+from torch.utils.data import DataLoader
 
-from app.core.lit_neural_cat import LitNeuralCAT
-from app.core.lit_neural_cat_optimized import (
-    LitNeuralCATOptimized,
-)
+from app.training.lit_model import LitCATModule
+from app.datasets.student_dataset import StudentSequenceDataset
 from app.infrastructure.database.connection import SessionLocal
 from app.infrastructure.database.models import Question, StudentSession
-
-
-class StudentSequenceDataset(Dataset):
-    def __init__(
-        self,
-        sequences,
-        question_embeddings,
-        question_concepts,
-        question_features=None,
-        question_option_counts=None,
-        max_seq_len=200,
-        K=1175,
-        return_indices=False,
-    ):
-        self.max_seq_len = max_seq_len
-        self.K = K
-        self.question_features = question_features
-        self.return_indices = return_indices
-
-        # 1. Build question ID to matrix index mapping
-        # Index 0 is reserved for padding question (all zeros)
-        q_ids_unique = list(question_embeddings.keys())
-        self.q_id_to_idx = {q_id: idx + 1 for idx, q_id in enumerate(q_ids_unique)}
-        num_questions = len(q_ids_unique)
-        
-        # 2. Determine max concepts per step across questions
-        self.max_c = 1
-        for q_id, concepts in question_concepts.items():
-            active_concepts = [cid for cid in concepts if 0 <= cid < K]
-            if len(active_concepts) > self.max_c:
-                self.max_c = len(active_concepts)
-        self.max_c = max(self.max_c, 1)
-        print(f"Max concepts per question: {self.max_c}")
-        
-        # 3. Pre-build question attribute matrices
-        print("Pre-building question metadata matrices...")
-        self.question_embeddings_matrix = np.zeros((num_questions + 1, 1024), dtype=np.float32)
-        self.question_concepts_matrix = np.full((num_questions + 1, self.max_c), -1, dtype=np.int64)
-        self.question_concepts_matrix[0, 0] = 0  # Prevents Softmax NaN at padding steps where question index is 0
-        self.question_g_priors = np.zeros(num_questions + 1, dtype=np.float32)
-        
-        if question_features is not None:
-            self.question_features_matrix = np.zeros((num_questions + 1, 22), dtype=np.float32)
-            
-        for q_id, idx in self.q_id_to_idx.items():
-            # Embeddings
-            emb = question_embeddings.get(q_id)
-            if emb is not None:
-                self.question_embeddings_matrix[idx] = emb
-                
-            # Concepts
-            db_concepts = question_concepts.get(q_id, [])
-            active_concepts = [cid for cid in db_concepts if 0 <= cid < K]
-            if not active_concepts:
-                active_concepts = [0]
-            self.question_concepts_matrix[idx, :len(active_concepts)] = active_concepts
-            
-            # Guess priors
-            opt_cnt = question_option_counts.get(q_id, 0) if question_option_counts else 0
-            g_prior = 1.0 / opt_cnt if opt_cnt >= 2 else 0.25
-            self.question_g_priors[idx] = g_prior
-            
-            # Tabular features
-            if question_features is not None:
-                feat = question_features.get(q_id)
-                if feat is not None:
-                    self.question_features_matrix[idx] = feat
-
-        # Pre-convert numpy matrices to PyTorch Tensors to avoid on-the-fly conversion overhead in __getitem__
-        self.question_embeddings_matrix = torch.from_numpy(self.question_embeddings_matrix)
-        self.question_concepts_matrix = torch.from_numpy(self.question_concepts_matrix)
-        self.question_g_priors = torch.from_numpy(self.question_g_priors)
-        if question_features is not None:
-            self.question_features_matrix = torch.from_numpy(self.question_features_matrix)
-
-        # 4. Pre-parse sequences to list of integer indices (O(1) RAM friendly)
-        print("Pre-parsing student sequences...")
-        self.processed = []
-        for session in sequences:
-            if not session.questions or not session.responses:
-                continue
-            
-            q_ids_seq = [q.strip() for q in session.questions.split(",") if q.strip()]
-            r_strings = [r.strip() for r in session.responses.split(",") if r.strip()]
-            
-            seq_len = min(len(q_ids_seq), len(r_strings), max_seq_len)
-            # 1. Bỏ qua chuỗi tương tác quá ngắn (seq_len < 3)
-            if seq_len < 3:
-                continue
-            
-            q_ids_seq = q_ids_seq[:seq_len]
-            r_strings = r_strings[:seq_len]
-            
-            if session.response_time:
-                raw_times = [t.strip() for t in session.response_time.split(",") if t.strip()]
-            else:
-                raw_times = []
-
-            # 2. Bỏ qua session bấm bừa liên tục (average response time < 3.0s)
-            if len(raw_times) > 0:
-                try:
-                    times_numeric = []
-                    for t in raw_times:
-                        try:
-                            val = float(t.strip())
-                            if val > 0:
-                                times_numeric.append(val)
-                        except ValueError:
-                            pass
-                    if len(times_numeric) > 0 and np.mean(times_numeric) < 3.0:
-                        continue
-                except Exception:
-                    pass
-
-            # 4.1 Map question IDs to matrix indices
-            q_indices = np.zeros(self.max_seq_len, dtype=np.int64)
-            for t in range(seq_len):
-                q_indices[t] = self.q_id_to_idx.get(q_ids_seq[t], 0)
-
-            # 4.2 Parse responses
-            r_arr = np.zeros(self.max_seq_len, dtype=np.float32)
-            for t in range(seq_len):
-                try:
-                    r_arr[t] = float(r_strings[t])
-                except ValueError:
-                    r_arr[t] = 0.0
-
-            # 4.3 Parse response times
-            time_arr = np.zeros(self.max_seq_len, dtype=np.float32)
-            for t in range(seq_len):
-                try:
-                    diff = float(raw_times[t]) if t < len(raw_times) else 30.0
-                except (ValueError, IndexError):
-                    diff = 30.0
-                if diff < 1.0 or diff > 300.0:
-                    diff = 30.0
-                time_arr[t] = diff
-
-            # 4.4 Padding mask
-            mask_arr = np.zeros(self.max_seq_len, dtype=np.bool_)
-            mask_arr[:seq_len] = True
-
-            self.processed.append(
-                {
-                    "q_indices": q_indices,
-                    "r_arr": r_arr,
-                    "time_arr": time_arr,
-                    "mask_arr": mask_arr,
-                }
-            )
-            
-        print(f"Pre-parsed and optimized {len(self.processed)} sequences successfully.")
-
-    def __len__(self):
-        return len(self.processed)
-
-    def __getitem__(self, index):
-        item = self.processed[index]
-        q_indices = item["q_indices"]
-        r = item["r_arr"]
-        T_time = item["time_arr"]
-        padding_mask = item["mask_arr"]
-
-        if self.return_indices:
-            return (
-                torch.from_numpy(q_indices),
-                torch.from_numpy(r),
-                torch.from_numpy(T_time),
-                torch.from_numpy(padding_mask),
-            )
-        
-        # O(1) Vectorized lookup directly on CPU Tensors (compatible fallback)
-        x = self.question_embeddings_matrix[q_indices]
-        concept_indices = self.question_concepts_matrix[q_indices]
-        g_priors = self.question_g_priors[q_indices]
-        
-        if self.question_features is not None:
-            x_feat = self.question_features_matrix[q_indices]
-            return (
-                x,
-                x_feat,
-                torch.from_numpy(r),
-                torch.from_numpy(T_time),
-                concept_indices,
-                torch.from_numpy(padding_mask),
-                g_priors,
-            )
-        else:
-            return (
-                x,
-                torch.from_numpy(r),
-                torch.from_numpy(T_time),
-                concept_indices,
-                torch.from_numpy(padding_mask),
-                g_priors,
-            )
 
 
 def parse_args():
@@ -219,7 +22,7 @@ def parse_args():
         "--model_type",
         type=str,
         default="base",
-        choices=["base", "optimized"],
+        choices=["base", "optimized", "film", "attn"],
         help="Which model version to train",
     )
     parser.add_argument(
@@ -234,6 +37,12 @@ def parse_args():
     )
     parser.add_argument(
         "--num_layers", type=int, default=4, help="Number of transformer layers"
+    )
+    parser.add_argument(
+        "--d_h", type=int, default=128, help="Hidden dimension of ability and sequence model"
+    )
+    parser.add_argument(
+        "--d_time", type=int, default=64, help="Hidden dimension of response time embedding"
     )
     parser.add_argument(
         "--lambda_reg",
@@ -318,135 +127,188 @@ def parse_args():
     )
     return parser.parse_args()
 
-class GPULitNeuralCAT(LitNeuralCAT):
+
+class GPULitNeuralCAT(LitCATModule):
     def __init__(self, question_embeddings, question_concepts, question_g_priors, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        from app.models.neural_cat_base import NeuralCATEngine
+        model = NeuralCATEngine(
+            d_x=kwargs.get("d_x", 1024),
+            d_time=kwargs.get("d_time", 32),
+            d_h=kwargs.get("d_h", 128),
+            K=kwargs.get("K", 10),
+            nhead=kwargs.get("nhead", 4),
+            num_layers=kwargs.get("num_layers", 2),
+            max_seq_len=kwargs.get("max_seq_len", 200),
+            num_questions=kwargs.get("num_questions"),
+        )
+        super().__init__(
+            model=model,
+            lr=kwargs.get("lr", 1e-3),
+            lambda_reg=kwargs.get("lambda_reg", 0.1),
+            scheduler_type="onecycle",
+        )
         self.register_buffer("question_embeddings_tbl", question_embeddings)
         self.register_buffer("question_concepts_tbl", question_concepts)
         self.register_buffer("question_g_priors_tbl", question_g_priors)
 
-    def training_step(self, batch, batch_idx):
+    def _assemble_batch(self, batch):
         q_indices, r, T_time, padding_mask = batch
         x = self.question_embeddings_tbl[q_indices]
         concept_indices = self.question_concepts_tbl[q_indices]
         g_priors = self.question_g_priors_tbl[q_indices]
-        
-        # 3. Lọc tương tác bấm bừa (< 2.0 giây) bằng loss_mask
-        loss_mask = padding_mask & (T_time >= 2.0)
-        
-        logits, g, s = self(x, r, T_time, concept_indices, padding_mask, g_priors, q_indices=q_indices)
-        loss, bce, reg = self._compute_loss(logits, r, g, s, loss_mask, g_priors)
-        
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log("train_bce_loss", bce, on_step=False, on_epoch=True, logger=True)
-        self.log("train_reg_loss", reg, on_step=False, on_epoch=True, logger=True)
-        return loss
+        return (x, r, T_time, concept_indices, padding_mask, g_priors)
+
+    def training_step(self, batch, batch_idx):
+        full_batch = self._assemble_batch(batch)
+        return self._shared_step(full_batch, "train")
 
     def validation_step(self, batch, batch_idx):
-        q_indices, r, T_time, padding_mask = batch
-        x = self.question_embeddings_tbl[q_indices]
-        concept_indices = self.question_concepts_tbl[q_indices]
-        g_priors = self.question_g_priors_tbl[q_indices]
-        
-        # 3. Lọc tương tác bấm bừa (< 2.0 giây) bằng loss_mask
-        loss_mask = padding_mask & (T_time >= 2.0)
-        
-        logits, g, s = self(x, r, T_time, concept_indices, padding_mask, g_priors, q_indices=q_indices)
-        loss, bce, reg = self._compute_loss(logits, r, g, s, loss_mask, g_priors)
-        
-        P = torch.sigmoid(logits)
-        preds = (P >= 0.5).float()
-        correct = (preds == r.float()).float()
-        
-        if loss_mask is not None:
-            mask_float = loss_mask.float()
-            acc = (correct * mask_float).sum() / mask_float.sum().clamp(min=1.0)
-        else:
-            acc = correct.mean()
-            
-        self.log("val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_bce_loss", bce, on_epoch=True, logger=True)
-        self.log("val_acc", acc, on_epoch=True, prog_bar=True, logger=True)
-        return {"val_loss": loss, "val_acc": acc}
+        full_batch = self._assemble_batch(batch)
+        return self._shared_step(full_batch, "val")
 
 
-class GPULitNeuralCATOptimized(LitNeuralCATOptimized):
+class GPULitNeuralCATOptimized(LitCATModule):
     def __init__(self, question_embeddings, question_concepts, question_g_priors, question_features, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        from app.models.neural_cat_optimized import NeuralCATEngineOptimized
+        model = NeuralCATEngineOptimized(
+            d_embedding=kwargs.get("d_embedding", 1024),
+            d_features=kwargs.get("d_features", 22),
+            d_time=kwargs.get("d_time", 32),
+            d_h=kwargs.get("d_h", 128),
+            K=kwargs.get("K", 10),
+            nhead=kwargs.get("nhead", 4),
+            num_layers=kwargs.get("num_layers", 2),
+            max_seq_len=kwargs.get("max_seq_len", 200),
+            num_questions=kwargs.get("num_questions"),
+        )
+        super().__init__(
+            model=model,
+            lr=kwargs.get("lr", 1e-3),
+            lambda_reg=kwargs.get("lambda_reg", 0.1),
+            lambda_unc=kwargs.get("lambda_unc", 0.1),
+            lambda_cl=kwargs.get("lambda_cl", 0.01),
+            loss_type=kwargs.get("loss_type", "bce"),
+            focal_alpha=kwargs.get("focal_alpha", 0.25),
+            focal_gamma=kwargs.get("focal_gamma", 2.0),
+            label_smoothing=kwargs.get("label_smoothing", 0.0),
+            scheduler_type="reduce_on_plateau",
+        )
         self.register_buffer("question_embeddings_tbl", question_embeddings)
         self.register_buffer("question_concepts_tbl", question_concepts)
         self.register_buffer("question_g_priors_tbl", question_g_priors)
         self.register_buffer("question_features_tbl", question_features)
 
-    def training_step(self, batch, batch_idx):
+    def _assemble_batch(self, batch):
         q_indices, r, T_time, padding_mask = batch
         x_emb = self.question_embeddings_tbl[q_indices]
         x_feat = self.question_features_tbl[q_indices]
         concept_indices = self.question_concepts_tbl[q_indices]
         g_priors = self.question_g_priors_tbl[q_indices]
-        
-        # 3. Lọc tương tác bấm bừa (< 2.0 giây) bằng loss_mask
-        loss_mask = padding_mask & (T_time >= 2.0)
-        
-        # Forward pass (now returns 4 elements)
-        logits, g, s, se = self(x_emb, x_feat, r, T_time, concept_indices, padding_mask, g_priors, q_indices=q_indices)
-        
-        # Compute loss (using loss_mask)
-        loss, bce, reg, unc = self._compute_loss(logits, r, g, s, se, loss_mask, g_priors)
-        
-        # Contrastive loss (still uses padding_mask to maintain SE progression consistency)
-        cl_loss = self._compute_contrastive_loss(se, r, padding_mask)
-        total_loss = loss + self.lambda_cl * cl_loss
-        
-        self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log("train_bce_loss", bce, on_step=False, on_epoch=True, logger=True)
-        self.log("train_reg_loss", reg, on_step=False, on_epoch=True, logger=True)
-        self.log("train_unc_loss", unc, on_step=False, on_epoch=True, logger=True)
-        self.log("train_cl_loss", cl_loss, on_step=False, on_epoch=True, logger=True)
-        
-        se_valid = se[padding_mask] if padding_mask is not None else se
-        self.log("train_se_mean", se_valid.mean(), on_step=False, on_epoch=True, logger=True)
-        return total_loss
+        return (x_emb, x_feat, r, T_time, concept_indices, padding_mask, g_priors)
+
+    def training_step(self, batch, batch_idx):
+        full_batch = self._assemble_batch(batch)
+        return self._shared_step(full_batch, "train")
 
     def validation_step(self, batch, batch_idx):
+        full_batch = self._assemble_batch(batch)
+        return self._shared_step(full_batch, "val")
+
+
+class GPULitNeuralCATFiLM(LitCATModule):
+    def __init__(self, question_embeddings, question_concepts, question_g_priors, question_features, *args, **kwargs):
+        from app.models.neural_cat_film import NeuralCATEngineFiLM
+        model = NeuralCATEngineFiLM(
+            d_embedding=kwargs.get("d_embedding", 1024),
+            d_features=kwargs.get("d_features", 22),
+            d_time=kwargs.get("d_time", 32),
+            d_h=kwargs.get("d_h", 128),
+            K=kwargs.get("K", 10),
+            nhead=kwargs.get("nhead", 4),
+            num_layers=kwargs.get("num_layers", 2),
+            max_seq_len=kwargs.get("max_seq_len", 200),
+            num_questions=kwargs.get("num_questions"),
+        )
+        super().__init__(
+            model=model,
+            lr=kwargs.get("lr", 1e-3),
+            lambda_reg=kwargs.get("lambda_reg", 0.1),
+            lambda_unc=kwargs.get("lambda_unc", 0.1),
+            lambda_cl=kwargs.get("lambda_cl", 0.01),
+            loss_type=kwargs.get("loss_type", "bce"),
+            focal_alpha=kwargs.get("focal_alpha", 0.25),
+            focal_gamma=kwargs.get("focal_gamma", 2.0),
+            label_smoothing=kwargs.get("label_smoothing", 0.0),
+            scheduler_type="reduce_on_plateau",
+        )
+        self.register_buffer("question_embeddings_tbl", question_embeddings)
+        self.register_buffer("question_concepts_tbl", question_concepts)
+        self.register_buffer("question_g_priors_tbl", question_g_priors)
+        self.register_buffer("question_features_tbl", question_features)
+
+    def _assemble_batch(self, batch):
         q_indices, r, T_time, padding_mask = batch
         x_emb = self.question_embeddings_tbl[q_indices]
         x_feat = self.question_features_tbl[q_indices]
         concept_indices = self.question_concepts_tbl[q_indices]
         g_priors = self.question_g_priors_tbl[q_indices]
-        
-        # 3. Lọc tương tác bấm bừa (< 2.0 giây) bằng loss_mask
-        loss_mask = padding_mask & (T_time >= 2.0)
-        
-        # Forward pass
-        logits, g, s, se = self(x_emb, x_feat, r, T_time, concept_indices, padding_mask, g_priors, q_indices=q_indices)
-        
-        # Compute loss (using loss_mask)
-        loss, bce, reg, unc = self._compute_loss(logits, r, g, s, se, loss_mask, g_priors)
-        
-        # Contrastive loss
-        cl_loss = self._compute_contrastive_loss(se, r, padding_mask)
-        total_loss = loss + self.lambda_cl * cl_loss
-        
-        P = torch.sigmoid(logits)
-        preds = (P >= 0.5).float()
-        correct = (preds == r.float()).float()
-        
-        if loss_mask is not None:
-            mask_float = loss_mask.float()
-            acc = (correct * mask_float).sum() / mask_float.sum().clamp(min=1.0)
-        else:
-            acc = correct.mean()
-            
-        self.log("val_loss", total_loss, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_bce_loss", bce, on_epoch=True, logger=True)
-        self.log("val_acc", acc, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val_unc_loss", unc, on_epoch=True, logger=True)
-        self.log("val_cl_loss", cl_loss, on_epoch=True, logger=True)
-        
-        se_valid = se[padding_mask] if padding_mask is not None else se
-        self.log("val_se_mean", se_valid.mean(), on_epoch=True, logger=True)
-        return {"val_loss": total_loss, "val_acc": acc}
+        return (x_emb, x_feat, r, T_time, concept_indices, padding_mask, g_priors)
+
+    def training_step(self, batch, batch_idx):
+        full_batch = self._assemble_batch(batch)
+        return self._shared_step(full_batch, "train")
+
+    def validation_step(self, batch, batch_idx):
+        full_batch = self._assemble_batch(batch)
+        return self._shared_step(full_batch, "val")
+
+
+class GPULitNeuralCATAttn(LitCATModule):
+    def __init__(self, question_embeddings, question_concepts, question_g_priors, question_features, *args, **kwargs):
+        from app.models.neural_cat_attn import NeuralCATEngineAttn
+        model = NeuralCATEngineAttn(
+            d_embedding=kwargs.get("d_embedding", 1024),
+            d_features=kwargs.get("d_features", 22),
+            d_time=kwargs.get("d_time", 32),
+            d_h=kwargs.get("d_h", 128),
+            K=kwargs.get("K", 10),
+            nhead=kwargs.get("nhead", 4),
+            num_layers=kwargs.get("num_layers", 2),
+            max_seq_len=kwargs.get("max_seq_len", 200),
+            num_questions=kwargs.get("num_questions"),
+        )
+        super().__init__(
+            model=model,
+            lr=kwargs.get("lr", 1e-3),
+            lambda_reg=kwargs.get("lambda_reg", 0.1),
+            lambda_unc=kwargs.get("lambda_unc", 0.1),
+            lambda_cl=kwargs.get("lambda_cl", 0.01),
+            loss_type=kwargs.get("loss_type", "bce"),
+            focal_alpha=kwargs.get("focal_alpha", 0.25),
+            focal_gamma=kwargs.get("focal_gamma", 2.0),
+            label_smoothing=kwargs.get("label_smoothing", 0.0),
+            scheduler_type="reduce_on_plateau",
+        )
+        self.register_buffer("question_embeddings_tbl", question_embeddings)
+        self.register_buffer("question_concepts_tbl", question_concepts)
+        self.register_buffer("question_g_priors_tbl", question_g_priors)
+        self.register_buffer("question_features_tbl", question_features)
+
+    def _assemble_batch(self, batch):
+        q_indices, r, T_time, padding_mask = batch
+        x_emb = self.question_embeddings_tbl[q_indices]
+        x_feat = self.question_features_tbl[q_indices]
+        concept_indices = self.question_concepts_tbl[q_indices]
+        g_priors = self.question_g_priors_tbl[q_indices]
+        return (x_emb, x_feat, r, T_time, concept_indices, padding_mask, g_priors)
+
+    def training_step(self, batch, batch_idx):
+        full_batch = self._assemble_batch(batch)
+        return self._shared_step(full_batch, "train")
+
+    def validation_step(self, batch, batch_idx):
+        full_batch = self._assemble_batch(batch)
+        return self._shared_step(full_batch, "val")
 
 
 def main():
@@ -654,8 +516,8 @@ def main():
             question_features=train_dataset.question_features_matrix,
             d_embedding=1024,
             d_features=22,
-            d_time=32,
-            d_h=128,
+            d_time=args.d_time,
+            d_h=args.d_h,
             K=K_val,
             nhead=args.nhead,
             num_layers=args.num_layers,
@@ -669,14 +531,59 @@ def main():
             num_questions=num_questions,
         )
         ckpt_filename = "best-neural-cat-optimized"
+    elif args.model_type == "film":
+        model = GPULitNeuralCATFiLM(
+            question_embeddings=train_dataset.question_embeddings_matrix,
+            question_concepts=train_dataset.question_concepts_matrix,
+            question_g_priors=train_dataset.question_g_priors,
+            question_features=train_dataset.question_features_matrix,
+            d_embedding=1024,
+            d_features=22,
+            d_time=args.d_time,
+            d_h=args.d_h,
+            K=K_val,
+            nhead=args.nhead,
+            num_layers=args.num_layers,
+            max_seq_len=args.max_seq_len,
+            lr=args.lr,
+            lambda_reg=args.lambda_reg,
+            loss_type=args.loss_type,
+            focal_alpha=args.focal_alpha,
+            focal_gamma=args.focal_gamma,
+            label_smoothing=args.label_smoothing,
+            num_questions=num_questions,
+        )
+    elif args.model_type == "attn":
+        model = GPULitNeuralCATAttn(
+            question_embeddings=train_dataset.question_embeddings_matrix,
+            question_concepts=train_dataset.question_concepts_matrix,
+            question_g_priors=train_dataset.question_g_priors,
+            question_features=train_dataset.question_features_matrix,
+            d_embedding=1024,
+            d_features=22,
+            d_time=args.d_time,
+            d_h=args.d_h,
+            K=K_val,
+            nhead=args.nhead,
+            num_layers=args.num_layers,
+            max_seq_len=args.max_seq_len,
+            lr=args.lr,
+            lambda_reg=args.lambda_reg,
+            loss_type=args.loss_type,
+            focal_alpha=args.focal_alpha,
+            focal_gamma=args.focal_gamma,
+            label_smoothing=args.label_smoothing,
+            num_questions=num_questions,
+        )
+        ckpt_filename = "best-neural-cat-attn"
     else:
         model = GPULitNeuralCAT(
             question_embeddings=train_dataset.question_embeddings_matrix,
             question_concepts=train_dataset.question_concepts_matrix,
             question_g_priors=train_dataset.question_g_priors,
             d_x=1024,
-            d_time=32,
-            d_h=128,
+            d_time=args.d_time,
+            d_h=args.d_h,
             K=K_val,
             nhead=args.nhead,
             num_layers=args.num_layers,
@@ -723,11 +630,14 @@ def main():
     else:
         precision = "32"
 
+    tb_logger = TensorBoardLogger(save_dir="lightning_logs", name=f"neural_cat_{args.model_type}")
+
     trainer = L.Trainer(
         max_epochs=args.epochs,
         accelerator=device,
         devices=1 if device == "gpu" else "auto",
         precision=precision,
+        logger=tb_logger,
         callbacks=[checkpoint_callback, last_checkpoint_callback, early_stop_callback],
         limit_train_batches=args.limit_train_batches,
         limit_val_batches=args.limit_val_batches,

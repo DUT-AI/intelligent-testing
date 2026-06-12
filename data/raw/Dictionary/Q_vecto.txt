@@ -1,8 +1,0 @@
-Q1_TinhToan: tính toán, số nguyên, số thập phân, phân số, cộng trừ, nhân chia, rút thừa số chung, làm tròn, tính nhanh, lũy thừa, phép tính, đổi đơn vị
-Q2_LyThuyetSo: chia hết, số dư, số lẻ, số chẵn, bội số, ước số, chữ số cuối cùng, hệ cơ số, nguyên tố
-Q3_HinhHoc: hình học, chu vi, diện tích, thể tích, hình vuông, hình chữ nhật, tam giác, bình hành, hình thang, góc, cắt ghép, tịnh tiến
-Q4_ChuyenDong: chuyển động, quãng đường, vận tốc, thời gian, gặp nhau, đuổi kịp, ngược chiều, cùng chiều, tàu hỏa, hành trình
-Q5_ToanDoKinhDien: gà thỏ, gà và thỏ, trồng cây, tuổi, trung bình cộng, công việc, thừa thiếu, dư thiếu, quy về đơn vị, lợi nhuận, lỗ, cưa gỗ
-Q6_TongHieuTi: tổng hiệu, tổng tỉ, tổng tỷ, hiệu tỉ, hiệu tỷ, tỉ lệ, tỷ lệ, tỉ số, phần trăm, đơn vị 1, đơn vị tổng thể
-Q7_Dem_ToHop: đếm, liệt kê, tổ hợp, hoán vị, sơ đồ cây, bao hàm, loại trừ, dirichlet, tạo số, ghép số
-Q8_Logic_TroChoi: logic, sudoku, ma phương, kỳ ảo, que diêm, chu kỳ, quy luật, phép toán mới, đồ thị, một nét, mật mã số

@@ -1,6 +1,19 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Any
 import numpy as np
+import torch
+
+
+@dataclass
+class CATModelOutput:
+    """
+    Data structure representing the output of a Computerized Adaptive Testing (CAT) model.
+    """
+    logits: torch.Tensor
+    g: torch.Tensor
+    s: torch.Tensor
+    se: torch.Tensor | None = None
+
 
 @dataclass
 class AdaptiveSession:
