@@ -37,11 +37,11 @@ except ModuleNotFoundError:
 
     _env = _read_env(os.path.join(os.path.dirname(__file__), "..", ".env"))
     _url = (
-        f"postgresql://{_env.get('POSTGRES_USER', 'admin')}:"
+        f"postgresql://{_env.get('POSTGRES_USER', '')}:"
         f"{_env.get('POSTGRES_PASSWORD', '')}@"
-        f"{_env.get('POSTGRES_HOST', 'localhost')}:"
-        f"{_env.get('POSTGRES_PORT', '5432')}/"
-        f"{_env.get('POSTGRES_DB', 'cpp_database')}"
+        f"{_env.get('POSTGRES_HOST', '')}:"
+        f"{_env.get('POSTGRES_PORT', '')}/"
+        f"{_env.get('POSTGRES_DB', '')}"
     )
     engine = create_engine(_url, pool_pre_ping=True)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -49,7 +49,7 @@ except ModuleNotFoundError:
 DATA_DIR = os.path.join("notebooks", "prepare_dataset")
 SKILLS_FILE = os.path.join(DATA_DIR, "skills_db_ready.json")
 QUESTIONS_FILE = os.path.join(DATA_DIR, "questions_db_ready.json")
-SESSIONS_FILE = os.path.join(DATA_DIR, "AI_Training_Sequences_All_Split.json")
+SESSIONS_FILE = os.path.join(DATA_DIR, "AI_Training_Sequences_No_Guessing.json")
 
 BATCH_SIZE = 1000
 

@@ -33524,28 +33524,6 @@
         ]
     },
     {
-        "question_id":7785,
-        "question_content":"02",
-        "all_option_ids":[
-            26267,
-            26268,
-            26269,
-            26270
-        ],
-        "all_options_content":[
-            "A2",
-            "B2",
-            "C2",
-            "D2"
-        ],
-        "correct_option_ids":[
-            26267
-        ],
-        "skill_ids":[
-            8
-        ]
-    },
-    {
         "question_id":7786,
         "question_content":"Chọn phát biểu đúng về tham chiếu?",
         "all_option_ids":[
@@ -33693,7 +33671,7 @@
             36601
         ],
         "skill_ids":[
-            8
+            7
         ]
     },
     {

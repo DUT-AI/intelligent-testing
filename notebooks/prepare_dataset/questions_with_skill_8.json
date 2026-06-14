@@ -1,0 +1,54 @@
+[
+    {
+        "question_id":7785,
+        "question_content":"02",
+        "all_option_ids":[
+            26267,
+            26268,
+            26269,
+            26270
+        ],
+        "all_options_content":[
+            "A2",
+            "B2",
+            "C2",
+            "D2"
+        ],
+        "correct_option_ids":[
+            26267
+        ],
+        "skill_ids":[
+            8
+        ]
+    },
+    {
+        "question_id":13295,
+        "question_content":"Kết quả thực hiện đoạn chương trình sau là gì? #include #include using namespace std;\nint main() {\n\tdouble Op1 = 10, Op2 = 5, Res;\n\tchar Op;\n\ttry {\n\t\tif (Op != '+' && Op != '-' && Op != '*' && Op != '\/')\n\t\t\tthrow Op;\n\t\tswitch(Op) {\n\t\t\tcase '+':\n\t\t\t\tRes = Op1 + Op2;\n\t\t\t\tbreak;\n\t\t\tcase '-':\n\t\t\t\tRes = Op1 - Op2;\n\t\t\t\tbreak;\n\t\t\tcase '*':\n\t\t\t\tRes = Op1 * Op2;\n\t\t\t\tbreak;\n\t\t\tcase '\/':\n\t\t\t\tRes = Op1 \/ Op2;\n\t\t\t\tbreak;\n\t\t}\n\t\tcout << \"\\n\" << Op1 << \" \" << Op << \" \"<< Op2 << \" = \" << Res;\n\t} catch (const char n) {\n\t\tcout << n << \" is not a valid operator\";\n\t}\n\treturn 0;\n}",
+        "all_option_ids":[
+            36598,
+            36599,
+            36600,
+            36601,
+            36602,
+            36603,
+            36604,
+            36605
+        ],
+        "all_options_content":[
+            "5",
+            "15",
+            "2",
+            "is not a valid operator",
+            "Another Answer",
+            "Runtime Error",
+            "Compile Error",
+            "50"
+        ],
+        "correct_option_ids":[
+            36601
+        ],
+        "skill_ids":[
+            8
+        ]
+    }
+]
